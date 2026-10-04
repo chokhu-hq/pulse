@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -338,6 +339,112 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"batch": responses,
 	})
+}
+
+type channelInfo struct {
+	SubscriptionCount *int `json:"subscription_count,omitempty"`
+	UserCount         *int `json:"user_count,omitempty"`
+}
+
+func (s *Server) getChannelInfo(appKey, channelName, info string) channelInfo {
+	var ci channelInfo
+	for attr := range strings.SplitSeq(info, ",") {
+		switch strings.TrimSpace(attr) {
+		case "subscription_count":
+			count := s.connectionMgr.GetSubscriberCount(appKey, channelName)
+			ci.SubscriptionCount = &count
+		case "user_count":
+			if protocol.IsPresenceChannel(channelName) {
+				count := s.connectionMgr.GetUserCount(appKey, channelName)
+				ci.UserCount = &count
+			}
+		}
+	}
+	return ci
+}
+
+func (s *Server) HandleChannels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+
+	targetApp, exists := s.appsManager.GetAppByID(parts[1])
+	if !exists {
+		http.Error(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	s.authMux.RLock()
+	authSvc, exists := s.authServices[targetApp.Key]
+	s.authMux.RUnlock()
+
+	if !exists {
+		http.Error(w, "Authentication service not found", http.StatusInternalServerError)
+		return
+	}
+
+	if err := authSvc.ValidateHTTPRequest(r.Method, r.URL.Path, r.URL.Query(), nil); err != nil {
+		log.Warn("authentication failed", "error", err, "app", targetApp.Key, "path", r.URL.Path)
+		http.Error(w, fmt.Sprintf("Authentication failed: %v", err), http.StatusUnauthorized)
+		return
+	}
+
+	info := r.URL.Query().Get("info")
+	wantsUserCount := slices.Contains(strings.Split(info, ","), "user_count")
+
+	var resp any
+	switch {
+	case len(parts) == 3:
+		prefix := r.URL.Query().Get("filter_by_prefix")
+		if wantsUserCount && !protocol.IsPresenceChannel(prefix) {
+			http.Error(w, "user_count requires filter_by_prefix=presence-", http.StatusBadRequest)
+			return
+		}
+		channels := make(map[string]channelInfo)
+		for _, name := range s.connectionMgr.GetChannelNames(targetApp.Key, prefix) {
+			channels[name] = s.getChannelInfo(targetApp.Key, name, info)
+		}
+		resp = map[string]any{"channels": channels}
+
+	case len(parts) == 4:
+		channelName := parts[3]
+		if wantsUserCount && !protocol.IsPresenceChannel(channelName) {
+			http.Error(w, "user_count is only available for presence channels", http.StatusBadRequest)
+			return
+		}
+		resp = struct {
+			Occupied bool `json:"occupied"`
+			channelInfo
+		}{
+			Occupied:    s.connectionMgr.GetSubscriberCount(targetApp.Key, channelName) > 0,
+			channelInfo: s.getChannelInfo(targetApp.Key, channelName, info),
+		}
+
+	case len(parts) == 5 && parts[4] == "users":
+		channelName := parts[3]
+		if !protocol.IsPresenceChannel(channelName) {
+			http.Error(w, "Users are only available for presence channels", http.StatusBadRequest)
+			return
+		}
+		type user struct {
+			ID string `json:"id"`
+		}
+		users := make([]user, 0)
+		for _, id := range s.connectionMgr.GetUserIDs(targetApp.Key, channelName) {
+			users = append(users, user{ID: id})
+		}
+		resp = map[string]any{"users": users}
+
+	default:
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {

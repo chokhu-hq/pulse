@@ -393,6 +393,18 @@ func (m *Manager) GetUserCount(appKey, channelName string) int {
 	return m.presenceManager.GetUserCount(channelKey(appKey, channelName))
 }
 
+func (m *Manager) GetChannelNames(appKey, prefix string) []string {
+	names := m.channelManager.GetChannelNames(channelKey(appKey, prefix))
+	for i, name := range names {
+		names[i] = name[len(appKey)+1:]
+	}
+	return names
+}
+
+func (m *Manager) GetUserIDs(appKey, channelName string) []string {
+	return m.presenceManager.GetPresenceData(channelKey(appKey, channelName)).IDs
+}
+
 // channels are namespaced per app so tenants sharing a channel name stay isolated
 func channelKey(appKey, channelName string) string {
 	return appKey + "\x00" + channelName

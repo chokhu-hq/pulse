@@ -75,6 +75,8 @@ func main() {
 				srv.HandleEvents(w, r)
 			case "batch_events":
 				srv.HandleBatchEvents(w, r)
+			case "channels":
+				srv.HandleChannels(w, r)
 			default:
 				http.Error(w, "Not found", http.StatusNotFound)
 			}

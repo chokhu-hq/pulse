@@ -2,6 +2,7 @@ package channel
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -105,6 +106,19 @@ func (m *Manager) GetChannelCount() int {
 	m.mux.RLock()
 	defer m.mux.RUnlock()
 	return len(m.channels)
+}
+
+func (m *Manager) GetChannelNames(prefix string) []string {
+	m.mux.RLock()
+	defer m.mux.RUnlock()
+
+	names := make([]string, 0)
+	for name := range m.channels {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func (m *Manager) GetSubscriberCount(channelName string) int {
