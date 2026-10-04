@@ -15,6 +15,7 @@ import (
 	"github.com/aelpxy/pulse/auth"
 	"github.com/aelpxy/pulse/channel"
 	"github.com/aelpxy/pulse/connection"
+	"github.com/aelpxy/pulse/protocol"
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 )
@@ -147,7 +148,6 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("panic in write pump", "connection", conn.ID, "panic", r)
-				s.connectionMgr.Unregister(conn)
 			}
 		}()
 		conn.WritePump()
@@ -228,12 +228,7 @@ func (s *Server) HandleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, ch := range channels {
-		var data any
-		if err := json.Unmarshal([]byte(trigger.Data), &data); err != nil {
-			log.Warn("failed to parse event data", "error", err, "channel", ch)
-			continue
-		}
-		s.connectionMgr.PublishToChannel(ch, trigger.Name, data)
+		s.connectionMgr.PublishToChannel(targetApp.Key, ch, trigger.Name, trigger.Data)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -318,12 +313,7 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	responses := make([]EventResponse, len(batchReq.Batch))
 
 	for i, event := range batchReq.Batch {
-		var data any
-		if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
-			log.Warn("failed to parse event data", "error", err, "channel", event.Channel, "event", event.Name)
-		}
-
-		s.connectionMgr.PublishToChannel(event.Channel, event.Name, data)
+		s.connectionMgr.PublishToChannel(targetApp.Key, event.Channel, event.Name, event.Data)
 
 		var resp EventResponse
 		if event.Info != "" {
@@ -331,10 +321,10 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 			for _, info := range infoParts {
 				info = strings.TrimSpace(info)
 				if info == "subscription_count" {
-					count := len(s.channelManager.GetSubscribers(event.Channel))
+					count := s.connectionMgr.GetSubscriberCount(targetApp.Key, event.Channel)
 					resp.SubscriptionCount = &count
-				} else if info == "user_count" && strings.HasPrefix(event.Channel, "presence-") {
-					count := len(s.channelManager.GetSubscribers(event.Channel))
+				} else if info == "user_count" && protocol.IsPresenceChannel(event.Channel) {
+					count := s.connectionMgr.GetUserCount(targetApp.Key, event.Channel)
 					resp.UserCount = &count
 				}
 			}

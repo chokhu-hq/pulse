@@ -1,9 +1,8 @@
 package connection
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,11 +13,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-var bufferPool = sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
+var errSendBufferFull = errors.New("send buffer full")
 
 type Connection struct {
 	ID              string
@@ -102,10 +97,10 @@ func (c *Connection) LastActivity() time.Time {
 
 func (c *Connection) WritePump() {
 	ticker := time.NewTicker(54 * time.Second)
+	// unregister is left to ReadPump so it never races with subscribe handling
 	defer func() {
 		ticker.Stop()
 		c.closeWebSocket()
-		c.manager.Unregister(c)
 	}()
 
 	const writeDeadline = 10 * time.Second
@@ -179,17 +174,10 @@ func (c *Connection) drainMessages() {
 }
 
 func (c *Connection) SendMessage(msg *protocol.Message) error {
-	buf := bufferPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer bufferPool.Put(buf)
-
-	encoder := json.NewEncoder(buf)
-	if err := encoder.Encode(msg); err != nil {
+	data, err := json.Marshal(msg)
+	if err != nil {
 		return err
 	}
-
-	data := make([]byte, buf.Len())
-	copy(data, buf.Bytes())
 
 	if log.GetLevel() == log.DebugLevel {
 		channelName := ""
@@ -199,11 +187,15 @@ func (c *Connection) SendMessage(msg *protocol.Message) error {
 		log.Debug("sending message", "connection", c.ID, "event", msg.Event, "channel", channelName)
 	}
 
+	return c.sendBytes(data)
+}
+
+func (c *Connection) sendBytes(data []byte) error {
 	select {
 	case c.send <- data:
 		return nil
 	default:
-		return fmt.Errorf("send buffer full")
+		return errSendBufferFull
 	}
 }
 
@@ -345,7 +337,7 @@ func (c *Connection) handleClientEvent(msg *protocol.Message) {
 		return
 	}
 
-	c.manager.BroadcastToChannel(channelName, msg, c.ID)
+	c.manager.BroadcastToChannel(c.AppKey, channelName, msg, c.ID)
 }
 
 func (c *Connection) sendError(message string, code *int) {

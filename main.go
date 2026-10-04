@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,6 +23,7 @@ func main() {
 	port := flag.String("port", "", "server port (overrides config file)")
 	maxConns := flag.Int("max-connections", 100000, "maximum concurrent connections")
 	debugFlag := flag.Bool("debug", false, "enable debug logging (overrides config file)")
+	pprofFlag := flag.Bool("pprof", false, "expose /debug/pprof endpoints")
 	flag.Parse()
 
 	configPath := *configFile
@@ -64,8 +65,9 @@ func main() {
 
 	metrics.AppsLoaded.Set(float64(srv.GetAppsManager().GetAppCount()))
 
-	http.HandleFunc("/app/", srv.HandleWebSocket)
-	http.HandleFunc("/apps/", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/app/", srv.HandleWebSocket)
+	mux.HandleFunc("/apps/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) >= 3 {
 			switch parts[2] {
@@ -80,17 +82,26 @@ func main() {
 			http.Error(w, "Not found", http.StatusNotFound)
 		}
 	})
-	http.HandleFunc("/stats", srv.HandleStats)
-	http.HandleFunc("/apps", srv.HandleApps)
-	http.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/stats", srv.HandleStats)
+	mux.HandleFunc("/apps", srv.HandleApps)
+	mux.Handle("/metrics", promhttp.Handler())
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	if *pprofFlag {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "OK")
 	})
 
 	httpServer := &http.Server{
 		Addr:         ":" + serverPort,
+		Handler:      mux,
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,

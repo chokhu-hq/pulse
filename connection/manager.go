@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -225,18 +226,7 @@ func (m *Manager) Unregister(conn *Connection) {
 	}
 
 	for _, channelName := range conn.GetChannels() {
-		if protocol.IsPresenceChannel(channelName) {
-			member := m.presenceManager.RemoveMember(channelName, conn.ID)
-			if member != nil {
-				memberRemovedMsg, err := protocol.NewMemberRemoved(channelName, map[string]any{
-					"user_id": member.UserID,
-				})
-				if err == nil {
-					m.BroadcastToChannel(channelName, memberRemovedMsg, "")
-				}
-			}
-		}
-		m.channelManager.Unsubscribe(channelName, conn.ID)
+		m.leaveChannel(conn, channelName)
 	}
 
 	conn.Close()
@@ -308,7 +298,8 @@ func (m *Manager) SubscribeConnection(conn *Connection, subData *protocol.Subscr
 		}
 	}
 
-	if err := m.channelManager.Subscribe(channelName, conn.ID); err != nil {
+	key := channelKey(conn.AppKey, channelName)
+	if err := m.channelManager.Subscribe(key, conn.ID); err != nil {
 		conn.sendError(fmt.Sprintf("Failed to subscribe: %v", err), nil)
 		return
 	}
@@ -316,14 +307,14 @@ func (m *Manager) SubscribeConnection(conn *Connection, subData *protocol.Subscr
 	conn.Subscribe(channelName)
 
 	if isPresence {
-		m.presenceManager.AddMember(channelName, conn.ID, presenceMember)
-
-		memberAddedMsg, err := protocol.NewMemberAdded(channelName, presenceMember)
-		if err == nil {
-			m.BroadcastToChannel(channelName, memberAddedMsg, conn.ID)
+		if m.presenceManager.AddMember(key, conn.ID, presenceMember) {
+			memberAddedMsg, err := protocol.NewMemberAdded(channelName, presenceMember)
+			if err == nil {
+				m.BroadcastToChannel(conn.AppKey, channelName, memberAddedMsg, conn.ID)
+			}
 		}
 
-		presenceData := m.presenceManager.GetPresenceData(channelName)
+		presenceData := m.presenceManager.GetPresenceData(key)
 		successMsg, err := protocol.NewSubscriptionSucceededWithPresence(channelName, presenceData)
 		if err != nil {
 			return
@@ -339,24 +330,38 @@ func (m *Manager) SubscribeConnection(conn *Connection, subData *protocol.Subscr
 }
 
 func (m *Manager) UnsubscribeConnection(conn *Connection, channelName string) {
+	m.leaveChannel(conn, channelName)
+	conn.Unsubscribe(channelName)
+}
+
+func (m *Manager) leaveChannel(conn *Connection, channelName string) {
+	key := channelKey(conn.AppKey, channelName)
+
 	if protocol.IsPresenceChannel(channelName) {
-		member := m.presenceManager.RemoveMember(channelName, conn.ID)
-		if member != nil {
-			memberRemovedMsg, err := protocol.NewMemberRemoved(channelName, map[string]interface{}{
+		member, lastForUser := m.presenceManager.RemoveMember(key, conn.ID)
+		if member != nil && lastForUser {
+			memberRemovedMsg, err := protocol.NewMemberRemoved(channelName, map[string]any{
 				"user_id": member.UserID,
 			})
 			if err == nil {
-				m.BroadcastToChannel(channelName, memberRemovedMsg, "")
+				m.BroadcastToChannel(conn.AppKey, channelName, memberRemovedMsg, conn.ID)
 			}
 		}
 	}
 
-	m.channelManager.Unsubscribe(channelName, conn.ID)
-	conn.Unsubscribe(channelName)
+	m.channelManager.Unsubscribe(key, conn.ID)
 }
 
-func (m *Manager) BroadcastToChannel(channelName string, msg *protocol.Message, excludeConnID string) {
-	connIDs := m.channelManager.GetSubscribers(channelName)
+func (m *Manager) BroadcastToChannel(appKey, channelName string, msg *protocol.Message, excludeConnID string) {
+	connIDs := m.channelManager.GetSubscribers(channelKey(appKey, channelName))
+	if len(connIDs) == 0 {
+		return
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
 
 	m.connectionsMux.RLock()
 	defer m.connectionsMux.RUnlock()
@@ -367,19 +372,30 @@ func (m *Manager) BroadcastToChannel(channelName string, msg *protocol.Message, 
 		}
 
 		if conn, exists := m.connections[connID]; exists {
-			conn.SendMessage(msg)
+			conn.sendBytes(data)
 		}
 	}
 }
 
-func (m *Manager) PublishToChannel(channelName string, event string, data any) error {
-	msg, err := protocol.NewMessage(event, &channelName, data)
-	if err != nil {
-		return err
-	}
+func (m *Manager) PublishToChannel(appKey, channelName, event, data string) {
+	m.BroadcastToChannel(appKey, channelName, &protocol.Message{
+		Event:   event,
+		Channel: &channelName,
+		Data:    data,
+	}, "")
+}
 
-	m.BroadcastToChannel(channelName, msg, "")
-	return nil
+func (m *Manager) GetSubscriberCount(appKey, channelName string) int {
+	return m.channelManager.GetSubscriberCount(channelKey(appKey, channelName))
+}
+
+func (m *Manager) GetUserCount(appKey, channelName string) int {
+	return m.presenceManager.GetUserCount(channelKey(appKey, channelName))
+}
+
+// channels are namespaced per app so tenants sharing a channel name stay isolated
+func channelKey(appKey, channelName string) string {
+	return appKey + "\x00" + channelName
 }
 
 func (m *Manager) Shutdown(timeout time.Duration) error {
