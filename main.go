@@ -77,6 +77,8 @@ func main() {
 				srv.HandleBatchEvents(w, r)
 			case "channels":
 				srv.HandleChannels(w, r)
+			case "users":
+				srv.HandleTerminateUserConnections(w, r)
 			default:
 				http.Error(w, "Not found", http.StatusNotFound)
 			}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -248,6 +249,16 @@ func (m *Manager) GetConnection(id string) (*Connection, bool) {
 
 func (m *Manager) SubscribeConnection(conn *Connection, subData *protocol.SubscribeData) {
 	channelName := subData.Channel
+
+	if strings.HasPrefix(channelName, "#") {
+		userID := conn.UserID()
+		if userID == "" || channelName != protocol.ServerToUserChannelPrefix+userID {
+			code := protocol.ErrorConnectionIsUnauthorized
+			conn.sendError("Not allowed to subscribe to this channel", &code)
+			return
+		}
+	}
+
 	isPresence := protocol.IsPresenceChannel(channelName)
 	var presenceMember *presence.Member
 
@@ -326,6 +337,54 @@ func (m *Manager) SubscribeConnection(conn *Connection, subData *protocol.Subscr
 			return
 		}
 		conn.SendMessage(successMsg)
+	}
+}
+
+func (m *Manager) SigninConnection(conn *Connection, authString, userData string) {
+	code := protocol.ErrorConnectionIsUnauthorized
+
+	if conn.UserID() != "" {
+		conn.sendError("Connection is already signed in", &code)
+		return
+	}
+
+	authSvc := m.getAuthService(conn.AppKey)
+	if authSvc == nil || !authSvc.ValidateUserAuth(authString, conn.ID, userData) {
+		conn.sendError("Invalid signin signature", &code)
+		return
+	}
+
+	var user struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(userData), &user); err != nil || user.ID == "" {
+		conn.sendError("user_data must contain an id", &code)
+		return
+	}
+
+	conn.setUserID(user.ID)
+
+	successMsg, err := protocol.NewSigninSuccess(userData)
+	if err != nil {
+		return
+	}
+	conn.SendMessage(successMsg)
+}
+
+func (m *Manager) TerminateUserConnections(appKey, userID string) {
+	m.connectionsMux.RLock()
+	var toClose []*Connection
+	for _, conn := range m.connections {
+		if conn.AppKey == appKey && conn.UserID() == userID {
+			toClose = append(toClose, conn)
+		}
+	}
+	m.connectionsMux.RUnlock()
+
+	code := protocol.ErrorConnectionIsUnauthorized
+	for _, conn := range toClose {
+		conn.sendError("Connection terminated", &code)
+		conn.Close()
 	}
 }
 

@@ -22,6 +22,7 @@ const (
 	PrivateChannelPrefix          = "private-"
 	PresenceChannelPrefix         = "presence-"
 	PrivateEncryptedChannelPrefix = "private-encrypted-"
+	ServerToUserChannelPrefix     = "#server-to-user-"
 )
 
 // socket close codes

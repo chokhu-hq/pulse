@@ -139,6 +139,10 @@ func NewMemberRemoved(channel string, memberData any) (*Message, error) {
 	return NewMessage("pusher_internal:member_removed", &channel, memberData)
 }
 
+func NewSigninSuccess(userData string) (*Message, error) {
+	return NewMessage(EventSigninSuccess, nil, map[string]string{"user_data": userData})
+}
+
 func ParseSubscribeData(dataStr string) (*SubscribeData, error) {
 	var data SubscribeData
 	if err := json.Unmarshal([]byte(dataStr), &data); err != nil {

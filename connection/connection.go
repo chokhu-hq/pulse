@@ -30,6 +30,8 @@ type Connection struct {
 	isClosed        bool
 	closeOnce       sync.Once
 	rateLimiter     *rate.Limiter
+	userID          string
+	userMux         sync.RWMutex
 }
 
 func NewConnection(id string, ws *websocket.Conn, manager *Manager, activityTimeout time.Duration) *Connection {
@@ -50,6 +52,18 @@ func NewConnection(id string, ws *websocket.Conn, manager *Manager, activityTime
 
 func (c *Connection) SetRateLimit(eventsPerSecond int, burst int) {
 	c.rateLimiter = rate.NewLimiter(rate.Limit(eventsPerSecond), burst)
+}
+
+func (c *Connection) UserID() string {
+	c.userMux.RLock()
+	defer c.userMux.RUnlock()
+	return c.userID
+}
+
+func (c *Connection) setUserID(userID string) {
+	c.userMux.Lock()
+	c.userID = userID
+	c.userMux.Unlock()
 }
 
 func (c *Connection) ReadPump() {
@@ -253,6 +267,8 @@ func (c *Connection) handleMessage(data []byte) {
 		c.handleSubscribe(&msg)
 	case protocol.EventUnsubscribe:
 		c.handleUnsubscribe(&msg)
+	case protocol.EventSignin:
+		c.handleSignin(&msg)
 	default:
 		c.handleClientEvent(&msg)
 	}
@@ -288,6 +304,19 @@ func (c *Connection) handleUnsubscribe(msg *protocol.Message) {
 	}
 
 	c.manager.UnsubscribeConnection(c, subData.Channel)
+}
+
+func (c *Connection) handleSignin(msg *protocol.Message) {
+	var data struct {
+		Auth     string `json:"auth"`
+		UserData string `json:"user_data"`
+	}
+	if err := json.Unmarshal([]byte(msg.Data), &data); err != nil {
+		c.sendError("Invalid signin data", nil)
+		return
+	}
+
+	c.manager.SigninConnection(c, data.Auth, data.UserData)
 }
 
 func (c *Connection) handleClientEvent(msg *protocol.Message) {

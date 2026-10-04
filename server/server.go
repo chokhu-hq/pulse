@@ -195,18 +195,7 @@ func (s *Server) HandleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	s.authMux.RLock()
-	authSvc, exists := s.authServices[targetApp.Key]
-	s.authMux.RUnlock()
-
-	if !exists {
-		http.Error(w, "Authentication service not found", http.StatusInternalServerError)
-		return
-	}
-
-	if err := authSvc.ValidateHTTPRequest(r.Method, r.URL.Path, r.URL.Query(), body); err != nil {
-		log.Warn("authentication failed", "error", err, "app", targetApp.Key, "path", r.URL.Path)
-		http.Error(w, fmt.Sprintf("Authentication failed: %v", err), http.StatusUnauthorized)
+	if !s.authorizeRequest(w, r, targetApp, body) {
 		return
 	}
 
@@ -279,18 +268,7 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	s.authMux.RLock()
-	authSvc, exists := s.authServices[targetApp.Key]
-	s.authMux.RUnlock()
-
-	if !exists {
-		http.Error(w, "Authentication service not found", http.StatusInternalServerError)
-		return
-	}
-
-	if err := authSvc.ValidateHTTPRequest(r.Method, r.URL.Path, r.URL.Query(), body); err != nil {
-		log.Warn("authentication failed", "error", err, "app", targetApp.Key, "path", r.URL.Path)
-		http.Error(w, fmt.Sprintf("Authentication failed: %v", err), http.StatusUnauthorized)
+	if !s.authorizeRequest(w, r, targetApp, body) {
 		return
 	}
 
@@ -331,6 +309,25 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, app *apps.App, body []byte) bool {
+	s.authMux.RLock()
+	authSvc, exists := s.authServices[app.Key]
+	s.authMux.RUnlock()
+
+	if !exists {
+		http.Error(w, "Authentication service not found", http.StatusInternalServerError)
+		return false
+	}
+
+	if err := authSvc.ValidateHTTPRequest(r.Method, r.URL.Path, r.URL.Query(), body); err != nil {
+		log.Warn("authentication failed", "error", err, "app", app.Key, "path", r.URL.Path)
+		http.Error(w, fmt.Sprintf("Authentication failed: %v", err), http.StatusUnauthorized)
+		return false
+	}
+
+	return true
+}
+
 type channelInfo struct {
 	SubscriptionCount *int `json:"subscription_count,omitempty"`
 	UserCount         *int `json:"user_count,omitempty"`
@@ -367,18 +364,7 @@ func (s *Server) HandleChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.authMux.RLock()
-	authSvc, exists := s.authServices[targetApp.Key]
-	s.authMux.RUnlock()
-
-	if !exists {
-		http.Error(w, "Authentication service not found", http.StatusInternalServerError)
-		return
-	}
-
-	if err := authSvc.ValidateHTTPRequest(r.Method, r.URL.Path, r.URL.Query(), nil); err != nil {
-		log.Warn("authentication failed", "error", err, "app", targetApp.Key, "path", r.URL.Path)
-		http.Error(w, fmt.Sprintf("Authentication failed: %v", err), http.StatusUnauthorized)
+	if !s.authorizeRequest(w, r, targetApp, nil) {
 		return
 	}
 
@@ -435,6 +421,41 @@ func (s *Server) HandleChannels(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) HandleTerminateUserConnections(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 5 || parts[3] == "" || parts[4] != "terminate_connections" {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	targetApp, exists := s.appsManager.GetAppByID(parts[1])
+	if !exists {
+		http.Error(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 10240)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if !s.authorizeRequest(w, r, targetApp, body) {
+		return
+	}
+
+	s.connectionMgr.TerminateUserConnections(targetApp.Key, parts[3])
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{}`)
 }
 
 func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {

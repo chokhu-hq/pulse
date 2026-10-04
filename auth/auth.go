@@ -50,6 +50,13 @@ func (s *Service) ValidateAuth(authString, socketID, channel string, channelData
 	return hmac.Equal([]byte(authString), []byte(expectedAuth))
 }
 
+func (s *Service) ValidateUserAuth(authString, socketID, userData string) bool {
+	h := hmac.New(sha256.New, []byte(s.appSecret))
+	h.Write([]byte(socketID + "::user::" + userData))
+	expectedAuth := s.appKey + ":" + hex.EncodeToString(h.Sum(nil))
+	return hmac.Equal([]byte(authString), []byte(expectedAuth))
+}
+
 func ParseAuthString(authString string) (appKey, signature string, err error) {
 	parts := strings.SplitN(authString, ":", 2)
 	if len(parts) != 2 {
