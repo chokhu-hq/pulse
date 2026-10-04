@@ -216,6 +216,7 @@ func (s *Server) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		Channels []string `json:"channels"`
 		Data     string   `json:"data"`
 		SocketID string   `json:"socket_id"`
+		Info     string   `json:"info"`
 	}
 
 	var trigger TriggerRequest
@@ -234,7 +235,16 @@ func (s *Server) HandleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{}`)
+	if trigger.Info == "" {
+		fmt.Fprintf(w, `{}`)
+		return
+	}
+
+	infos := make(map[string]channelInfo, len(channels))
+	for _, ch := range channels {
+		infos[ch] = s.getChannelInfo(targetApp.Key, ch, trigger.Info)
+	}
+	json.NewEncoder(w).Encode(map[string]any{"channels": infos})
 }
 
 func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
@@ -308,31 +318,11 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type EventResponse struct {
-		SubscriptionCount *int `json:"subscription_count,omitempty"`
-		UserCount         *int `json:"user_count,omitempty"`
-	}
-
-	responses := make([]EventResponse, len(batchReq.Batch))
+	responses := make([]channelInfo, len(batchReq.Batch))
 
 	for i, event := range batchReq.Batch {
 		s.connectionMgr.PublishToChannel(targetApp.Key, event.Channel, event.Name, event.Data, event.SocketID)
-
-		var resp EventResponse
-		if event.Info != "" {
-			infoParts := strings.Split(event.Info, ",")
-			for _, info := range infoParts {
-				info = strings.TrimSpace(info)
-				if info == "subscription_count" {
-					count := s.connectionMgr.GetSubscriberCount(targetApp.Key, event.Channel)
-					resp.SubscriptionCount = &count
-				} else if info == "user_count" && protocol.IsPresenceChannel(event.Channel) {
-					count := s.connectionMgr.GetUserCount(targetApp.Key, event.Channel)
-					resp.UserCount = &count
-				}
-			}
-		}
-		responses[i] = resp
+		responses[i] = s.getChannelInfo(targetApp.Key, event.Channel, event.Info)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
