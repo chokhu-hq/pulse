@@ -8,6 +8,7 @@ type Message struct {
 	Channel *string         `json:"channel,omitempty"`
 	Data    string          `json:"-"`
 	RawData json.RawMessage `json:"data,omitempty"`
+	UserID  string          `json:"user_id,omitempty"`
 }
 
 // check https://github.com/pusher/pusher-socket-protocol/blob/master/protocol.adoc#events
@@ -16,11 +17,13 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		Event   string  `json:"event"`
 		Channel *string `json:"channel,omitempty"`
 		Data    string  `json:"data,omitempty"`
+		UserID  string  `json:"user_id,omitempty"`
 	}
 
 	temp := TempMessage{
 		Event:   m.Event,
 		Channel: m.Channel,
+		UserID:  m.UserID,
 	}
 
 	if m.Data != "" {

@@ -366,6 +366,12 @@ func (c *Connection) handleClientEvent(msg *protocol.Message) {
 		return
 	}
 
+	if protocol.IsPresenceChannel(channelName) {
+		if member, ok := c.manager.presenceManager.GetMember(channelKey(c.AppKey, channelName), c.ID); ok {
+			msg.UserID = member.UserID
+		}
+	}
+
 	c.manager.BroadcastToChannel(c.AppKey, channelName, msg, c.ID)
 }
 
