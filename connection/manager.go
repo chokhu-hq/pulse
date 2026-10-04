@@ -377,12 +377,12 @@ func (m *Manager) BroadcastToChannel(appKey, channelName string, msg *protocol.M
 	}
 }
 
-func (m *Manager) PublishToChannel(appKey, channelName, event, data string) {
+func (m *Manager) PublishToChannel(appKey, channelName, event, data, excludeConnID string) {
 	m.BroadcastToChannel(appKey, channelName, &protocol.Message{
 		Event:   event,
 		Channel: &channelName,
 		Data:    data,
-	}, "")
+	}, excludeConnID)
 }
 
 func (m *Manager) GetSubscriberCount(appKey, channelName string) int {

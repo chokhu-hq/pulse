@@ -214,6 +214,7 @@ func (s *Server) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		Channel  string   `json:"channel"`
 		Channels []string `json:"channels"`
 		Data     string   `json:"data"`
+		SocketID string   `json:"socket_id"`
 	}
 
 	var trigger TriggerRequest
@@ -228,7 +229,7 @@ func (s *Server) HandleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, ch := range channels {
-		s.connectionMgr.PublishToChannel(targetApp.Key, ch, trigger.Name, trigger.Data)
+		s.connectionMgr.PublishToChannel(targetApp.Key, ch, trigger.Name, trigger.Data, trigger.SocketID)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -283,10 +284,11 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type BatchEvent struct {
-		Name    string `json:"name"`
-		Channel string `json:"channel"`
-		Data    string `json:"data"`
-		Info    string `json:"info,omitempty"`
+		Name     string `json:"name"`
+		Channel  string `json:"channel"`
+		Data     string `json:"data"`
+		Info     string `json:"info,omitempty"`
+		SocketID string `json:"socket_id"`
 	}
 
 	type BatchRequest struct {
@@ -313,7 +315,7 @@ func (s *Server) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	responses := make([]EventResponse, len(batchReq.Batch))
 
 	for i, event := range batchReq.Batch {
-		s.connectionMgr.PublishToChannel(targetApp.Key, event.Channel, event.Name, event.Data)
+		s.connectionMgr.PublishToChannel(targetApp.Key, event.Channel, event.Name, event.Data, event.SocketID)
 
 		var resp EventResponse
 		if event.Info != "" {
