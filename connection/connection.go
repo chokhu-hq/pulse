@@ -16,7 +16,8 @@ import (
 
 var errSendBufferFull = errors.New("send buffer full")
 
-const maxSendQueue = 512
+// broadcast payloads are shared across subscribers, so this mostly bounds how far one client may lag
+const maxQueuedBytes = 1 << 20
 
 var frameBufPool = sync.Pool{New: func() any {
 	b := make([]byte, 0, 16*1024)
@@ -29,6 +30,8 @@ type Connection struct {
 	ws              *websocket.Conn
 	sendMu          sync.Mutex
 	sendQueue       [][]byte
+	queuedBytes     int
+	slowConsumer    bool
 	sendReady       chan struct{}
 	manager         *Manager
 	channels        map[string]bool
@@ -38,6 +41,8 @@ type Connection struct {
 	closing         chan struct{}
 	closeMux        sync.Mutex
 	isClosed        bool
+	closeCode       int
+	closeReason     string
 	closeOnce       sync.Once
 	rateLimiter     *rate.Limiter
 	userID          string
@@ -154,10 +159,18 @@ func (c *Connection) WritePump() {
 		case <-c.closing:
 			ticker.Stop()
 			c.drainMessages()
-			c.ws.WriteMessage(websocket.CloseMessage, []byte{})
+			// closeCode is written before closing is closed, so reading it here is race free
+			c.ws.WriteMessage(websocket.CloseMessage, c.closeFrame())
 			return
 		}
 	}
+}
+
+func (c *Connection) closeFrame() []byte {
+	if c.closeCode == 0 {
+		return []byte{}
+	}
+	return websocket.FormatCloseMessage(c.closeCode, c.closeReason)
 }
 
 func (c *Connection) drainMessages() {
@@ -168,6 +181,7 @@ func (c *Connection) takeQueued(spare [][]byte) [][]byte {
 	c.sendMu.Lock()
 	batch := c.sendQueue
 	c.sendQueue = spare[:0]
+	c.queuedBytes = 0
 	c.sendMu.Unlock()
 	return batch
 }
@@ -229,11 +243,21 @@ func (c *Connection) SendMessage(msg *protocol.Message) error {
 
 func (c *Connection) sendBytes(data []byte) error {
 	c.sendMu.Lock()
-	if len(c.sendQueue) >= maxSendQueue {
+	if c.slowConsumer {
 		c.sendMu.Unlock()
 		return errSendBufferFull
 	}
+	if c.queuedBytes+len(data) > maxQueuedBytes {
+		c.slowConsumer = true
+		queued := c.queuedBytes
+		c.sendMu.Unlock()
+
+		log.Warn("disconnecting slow client", "connection", c.ID, "app", c.AppKey, "queued_bytes", queued)
+		c.CloseWithCode(protocol.ErrorOverCapacity, "Client too slow to receive messages")
+		return errSendBufferFull
+	}
 	c.sendQueue = append(c.sendQueue, data)
+	c.queuedBytes += len(data)
 	c.sendMu.Unlock()
 
 	select {
@@ -420,6 +444,10 @@ func (c *Connection) closeWebSocket() {
 }
 
 func (c *Connection) Close() {
+	c.CloseWithCode(0, "")
+}
+
+func (c *Connection) CloseWithCode(code int, reason string) {
 	c.closeMux.Lock()
 	defer c.closeMux.Unlock()
 
@@ -427,6 +455,8 @@ func (c *Connection) Close() {
 		return
 	}
 	c.isClosed = true
+	c.closeCode = code
+	c.closeReason = reason
 
 	close(c.closing)
 }
