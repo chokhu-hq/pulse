@@ -6,16 +6,16 @@ A Pusher Protocol v7 compatible server written in Go. Pulse implements the offic
 
 <!-- bench:start -->
 
-> Measured automatically on a shared GitHub Actions runner ([run](https://github.com/axerity/pulse/actions/runs/37624352403), commit `54aa271`). Expect lower numbers and some run-to-run variance compared to dedicated hardware.
+> Measured automatically on a shared GitHub Actions runner ([run](https://github.com/axerity/pulse/actions/runs/37625251338), commit `1b0c7b1`). Expect lower numbers and some run-to-run variance compared to dedicated hardware.
 
 linux/amd64, 4 CPUs, payload 200 bytes, server and load generator on the same host, measured 2026-10-07
 
 | Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| publish throughput | 1 | 256 | 23.9k | 23.9k | 0 | 82.70 µs | - |
-| fan-out 100 subscribers | 100 | 32 | 6.2k | 621.7k | 0 | 3.36 µs | - |
-| fan-out 1000 subscribers | 1000 | 16 | 697 | 696.8k | 0 | 3.44 µs | 25.2 KB |
-| fan-out 5000 subscribers | 5000 | 16 | 181 | 893.4k | 0 | 2.62 µs | 24.2 KB |
+| publish throughput | 1 | 256 | 22.9k | 22.9k | 0 | 90.20 µs | - |
+| fan-out 100 subscribers | 100 | 32 | 5.5k | 545.6k | 0 | 3.67 µs | - |
+| fan-out 1000 subscribers | 1000 | 16 | 544 | 544.0k | 0 | 4.17 µs | 25.7 KB |
+| fan-out 5000 subscribers | 5000 | 16 | 156 | 777.0k | 0 | 3.12 µs | 19.4 KB |
 
 <!-- bench:end -->
 
