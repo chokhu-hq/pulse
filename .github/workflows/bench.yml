@@ -1,0 +1,42 @@
+name: bench
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build pulse
+        run: go build -o pulse .
+
+      - name: Run benchmarks
+        run: |
+          ulimit -n 65536
+          go run ./bench -bin ./pulse -md bench.md -json bench.json
+
+      - name: Publish summary
+        if: always()
+        run: test -f bench.md && cat bench.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ github.sha }}
+          path: bench.json
+          if-no-files-found: ignore

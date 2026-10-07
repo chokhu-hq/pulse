@@ -6,44 +6,44 @@ import (
 	"sync"
 )
 
-type Channel struct {
+type Channel[T any] struct {
 	Name        string
-	subscribers map[string]bool
+	subscribers map[string]T
 	mux         sync.RWMutex
 }
 
-type Manager struct {
-	channels map[string]*Channel
+type Manager[T any] struct {
+	channels map[string]*Channel[T]
 	mux      sync.RWMutex
 }
 
-func NewManager() *Manager {
-	return &Manager{
-		channels: make(map[string]*Channel),
+func NewManager[T any]() *Manager[T] {
+	return &Manager[T]{
+		channels: make(map[string]*Channel[T]),
 	}
 }
 
-func (m *Manager) Subscribe(channelName, connID string) error {
+func (m *Manager[T]) Subscribe(channelName, connID string, sub T) error {
 	m.mux.Lock()
 	defer m.mux.Unlock()
 
 	channel, exists := m.channels[channelName]
 	if !exists {
-		channel = &Channel{
+		channel = &Channel[T]{
 			Name:        channelName,
-			subscribers: make(map[string]bool),
+			subscribers: make(map[string]T),
 		}
 		m.channels[channelName] = channel
 	}
 
 	channel.mux.Lock()
-	channel.subscribers[connID] = true
+	channel.subscribers[connID] = sub
 	channel.mux.Unlock()
 
 	return nil
 }
 
-func (m *Manager) Unsubscribe(channelName, connID string) {
+func (m *Manager[T]) Unsubscribe(channelName, connID string) {
 	m.mux.RLock()
 	channel, exists := m.channels[channelName]
 	m.mux.RUnlock()
@@ -70,27 +70,25 @@ func (m *Manager) Unsubscribe(channelName, connID string) {
 	}
 }
 
-func (m *Manager) GetSubscribers(channelName string) []string {
+// fn runs under the channel read lock, so it must not block or call back into the manager
+func (m *Manager[T]) ForEachSubscriber(channelName string, fn func(connID string, sub T)) {
 	m.mux.RLock()
 	channel, exists := m.channels[channelName]
 	m.mux.RUnlock()
 
 	if !exists {
-		return []string{}
+		return
 	}
 
 	channel.mux.RLock()
 	defer channel.mux.RUnlock()
 
-	subscribers := make([]string, 0, len(channel.subscribers))
-	for connID := range channel.subscribers {
-		subscribers = append(subscribers, connID)
+	for connID, sub := range channel.subscribers {
+		fn(connID, sub)
 	}
-
-	return subscribers
 }
 
-func (m *Manager) GetChannel(channelName string) (*Channel, error) {
+func (m *Manager[T]) GetChannel(channelName string) (*Channel[T], error) {
 	m.mux.RLock()
 	defer m.mux.RUnlock()
 
@@ -102,13 +100,13 @@ func (m *Manager) GetChannel(channelName string) (*Channel, error) {
 	return channel, nil
 }
 
-func (m *Manager) GetChannelCount() int {
+func (m *Manager[T]) GetChannelCount() int {
 	m.mux.RLock()
 	defer m.mux.RUnlock()
 	return len(m.channels)
 }
 
-func (m *Manager) GetChannelNames(prefix string) []string {
+func (m *Manager[T]) GetChannelNames(prefix string) []string {
 	m.mux.RLock()
 	defer m.mux.RUnlock()
 
@@ -121,7 +119,7 @@ func (m *Manager) GetChannelNames(prefix string) []string {
 	return names
 }
 
-func (m *Manager) GetSubscriberCount(channelName string) int {
+func (m *Manager[T]) GetSubscriberCount(channelName string) int {
 	m.mux.RLock()
 	channel, exists := m.channels[channelName]
 	m.mux.RUnlock()

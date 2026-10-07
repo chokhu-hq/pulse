@@ -3,7 +3,7 @@ package connection
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +31,7 @@ type Manager struct {
 	connections     map[string]*Connection
 	appConnCount    map[string]int
 	connectionsMux  sync.RWMutex
-	channelManager  *channel.Manager
+	channelManager  *channel.Manager[*Connection]
 	presenceManager *presence.Manager
 	appsManager     *apps.Manager
 	authService     *auth.Service
@@ -50,7 +50,7 @@ type Manager struct {
 }
 
 // NewManager creates a new connection manager with connection limits
-func NewManager(channelManager *channel.Manager, authService *auth.Service, maxConnections int) *Manager {
+func NewManager(channelManager *channel.Manager[*Connection], authService *auth.Service, maxConnections int) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
@@ -310,7 +310,7 @@ func (m *Manager) SubscribeConnection(conn *Connection, subData *protocol.Subscr
 	}
 
 	key := channelKey(conn.AppKey, channelName)
-	if err := m.channelManager.Subscribe(key, conn.ID); err != nil {
+	if err := m.channelManager.Subscribe(key, conn.ID, conn); err != nil {
 		conn.sendError(fmt.Sprintf("Failed to subscribe: %v", err), nil)
 		return
 	}
@@ -412,8 +412,8 @@ func (m *Manager) leaveChannel(conn *Connection, channelName string) {
 }
 
 func (m *Manager) BroadcastToChannel(appKey, channelName string, msg *protocol.Message, excludeConnID string) {
-	connIDs := m.channelManager.GetSubscribers(channelKey(appKey, channelName))
-	if len(connIDs) == 0 {
+	key := channelKey(appKey, channelName)
+	if m.channelManager.GetSubscriberCount(key) == 0 {
 		return
 	}
 
@@ -422,18 +422,11 @@ func (m *Manager) BroadcastToChannel(appKey, channelName string, msg *protocol.M
 		return
 	}
 
-	m.connectionsMux.RLock()
-	defer m.connectionsMux.RUnlock()
-
-	for _, connID := range connIDs {
-		if connID == excludeConnID {
-			continue
-		}
-
-		if conn, exists := m.connections[connID]; exists {
+	m.channelManager.ForEachSubscriber(key, func(connID string, conn *Connection) {
+		if connID != excludeConnID {
 			conn.sendBytes(data)
 		}
-	}
+	})
 }
 
 func (m *Manager) PublishToChannel(appKey, channelName, event, data, excludeConnID string) {
@@ -521,6 +514,10 @@ func generateSocketID() (string, error) {
 		return "", err
 	}
 
-	socketID := hex.EncodeToString(b[:4]) + "." + hex.EncodeToString(b[4:])
-	return socketID, nil
+	// Pusher socket ids are two decimal integers separated by a dot
+	// (matching the regex \d+\.\d+). The official SDKs validate this format
+	// and reject anything non-numeric (e.g. hex), so emit decimal components.
+	left := binary.BigEndian.Uint32(b[:4])
+	right := binary.BigEndian.Uint32(b[4:])
+	return fmt.Sprintf("%d.%d", left, right), nil
 }

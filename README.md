@@ -2,6 +2,17 @@
 
 A Pusher Protocol v7 compatible server written in Go. Pulse implements the official Pusher Channels protocol, allowing you to use any Pusher SDK with your own self-hosted server.
 
+## Benchmarks
+
+linux/amd64, 16 CPUs, payload 200 bytes, server and load generator on the same host
+
+| Scenario                 | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
+| ------------------------ | ----------: | ---------: | ----------: | -----------: | ------: | --------------------: | ---------: |
+| publish throughput       |           1 |        256 |      106.4k |        93.5k |   11988 |              62.49 µs |          - |
+| fan-out 100 subscribers  |         100 |         32 |       12.4k |        1.24M |       0 |               3.50 µs |          - |
+| fan-out 1000 subscribers |        1000 |         16 |        2.8k |        2.84M |       0 |               2.58 µs |    22.7 KB |
+| fan-out 5000 subscribers |        5000 |         16 |         496 |        2.48M |       0 |               3.59 µs |    19.0 KB |
+
 ## Installation
 
 ### Build from Source
@@ -107,7 +118,7 @@ An example config (name this as `config.json` then pass it via flag `-config=pat
 #### Server Properties
 
 | Property | Type | Description |
-|----------|------|-------------|
+| ---------- | ------ | ------------- |
 | `debug` | boolean | Enable debug logging for troubleshooting |
 | `port` | string | Port number the server listens on |
 | `hostname` | string | Hostname/IP the server binds to (empty for all interfaces) |
@@ -116,7 +127,7 @@ An example config (name this as `config.json` then pass it via flag `-config=pat
 #### App Properties
 
 | Property | Type | Description |
-|----------|------|-------------|
+| ---------- | ------ | ------------- |
 | `id` | string | Unique identifier for the application |
 | `key` | string | Public key used by clients to connect |
 | `secret` | string | Secret key used for authentication and signing |

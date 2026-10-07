@@ -23,7 +23,7 @@ import (
 
 type Server struct {
 	appsManager    *apps.Manager
-	channelManager *channel.Manager
+	channelManager *channel.Manager[*connection.Connection]
 	connectionMgr  *connection.Manager
 	authServices   map[string]*auth.Service
 	authMux        sync.RWMutex
@@ -49,7 +49,7 @@ func New(config Config) (*Server, *apps.ServerConfig, error) {
 
 	log.Info("loaded apps", "count", appsMgr.GetAppCount(), "file", config.AppsConfigFile)
 
-	channelMgr := channel.NewManager()
+	channelMgr := channel.NewManager[*connection.Connection]()
 
 	connMgr := connection.NewManager(channelMgr, nil, config.MaxConnections)
 
@@ -65,6 +65,8 @@ func New(config Config) (*Server, *apps.ServerConfig, error) {
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
+		// pings and close frames are the only gorilla writes, so share buffers instead of holding one per connection
+		WriteBufferPool: &sync.Pool{},
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},

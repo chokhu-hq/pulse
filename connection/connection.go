@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -15,11 +16,20 @@ import (
 
 var errSendBufferFull = errors.New("send buffer full")
 
+const maxSendQueue = 512
+
+var frameBufPool = sync.Pool{New: func() any {
+	b := make([]byte, 0, 16*1024)
+	return &b
+}}
+
 type Connection struct {
 	ID              string
 	AppKey          string
 	ws              *websocket.Conn
-	send            chan []byte
+	sendMu          sync.Mutex
+	sendQueue       [][]byte
+	sendReady       chan struct{}
 	manager         *Manager
 	channels        map[string]bool
 	channelsMux     sync.RWMutex
@@ -38,7 +48,7 @@ func NewConnection(id string, ws *websocket.Conn, manager *Manager, activityTime
 	conn := &Connection{
 		ID:              id,
 		ws:              ws,
-		send:            make(chan []byte, 512),
+		sendReady:       make(chan struct{}, 1),
 		manager:         manager,
 		channels:        make(map[string]bool),
 		activityTimeout: activityTimeout,
@@ -118,36 +128,21 @@ func (c *Connection) WritePump() {
 	}()
 
 	const writeDeadline = 10 * time.Second
+	var spare [][]byte
 
 	for {
 		select {
-		case message, ok := <-c.send:
-			c.ws.SetWriteDeadline(time.Now().Add(writeDeadline))
-
-			if !ok {
-				c.drainMessages()
-				c.ws.WriteMessage(websocket.CloseMessage, []byte{})
-				return
+		case <-c.sendReady:
+			batch := c.takeQueued(spare)
+			err := c.writeFrames(batch, time.Now().Add(writeDeadline))
+			clear(batch)
+			// spare was handed to the queue, so always replace it; drop burst-sized slices for gc
+			spare = nil
+			if cap(batch) <= 64 {
+				spare = batch
 			}
-
-			if err := c.ws.WriteMessage(websocket.TextMessage, message); err != nil {
+			if err != nil {
 				return
-			}
-
-		batchLoop:
-			for range 10 {
-				select {
-				case message, ok := <-c.send:
-					if !ok {
-						c.ws.WriteMessage(websocket.CloseMessage, []byte{})
-						return
-					}
-					if err := c.ws.WriteMessage(websocket.TextMessage, message); err != nil {
-						return
-					}
-				default:
-					break batchLoop
-				}
 			}
 
 		case <-ticker.C:
@@ -166,25 +161,53 @@ func (c *Connection) WritePump() {
 }
 
 func (c *Connection) drainMessages() {
-	deadline := time.Now().Add(5 * time.Second)
-	c.ws.SetWriteDeadline(deadline)
+	c.writeFrames(c.takeQueued(nil), time.Now().Add(5*time.Second))
+}
 
-	for {
-		select {
-		case message, ok := <-c.send:
-			if !ok {
-				return
-			}
+func (c *Connection) takeQueued(spare [][]byte) [][]byte {
+	c.sendMu.Lock()
+	batch := c.sendQueue
+	c.sendQueue = spare[:0]
+	c.sendMu.Unlock()
+	return batch
+}
 
-			c.ws.WriteMessage(websocket.TextMessage, message)
-		default:
-			return
-		}
-
-		if time.Now().After(deadline) {
-			return
-		}
+// encodes all queued messages into one buffer so a burst costs a single write syscall
+func (c *Connection) writeFrames(messages [][]byte, deadline time.Time) error {
+	if len(messages) == 0 {
+		return nil
 	}
+
+	bp := frameBufPool.Get().(*[]byte)
+	buf := (*bp)[:0]
+	for _, message := range messages {
+		buf = appendTextFrame(buf, message)
+	}
+
+	netConn := c.ws.NetConn()
+	netConn.SetWriteDeadline(deadline)
+	_, err := netConn.Write(buf)
+
+	if cap(buf) <= 256*1024 {
+		*bp = buf
+		frameBufPool.Put(bp)
+	}
+	return err
+}
+
+// unmasked, uncompressed server frame per RFC 6455 section 5.2
+func appendTextFrame(buf, payload []byte) []byte {
+	n := len(payload)
+	switch {
+	case n < 126:
+		buf = append(buf, 0x81, byte(n))
+	case n <= 0xFFFF:
+		buf = append(buf, 0x81, 126, byte(n>>8), byte(n))
+	default:
+		buf = append(buf, 0x81, 127)
+		buf = binary.BigEndian.AppendUint64(buf, uint64(n))
+	}
+	return append(buf, payload...)
 }
 
 func (c *Connection) SendMessage(msg *protocol.Message) error {
@@ -205,12 +228,19 @@ func (c *Connection) SendMessage(msg *protocol.Message) error {
 }
 
 func (c *Connection) sendBytes(data []byte) error {
-	select {
-	case c.send <- data:
-		return nil
-	default:
+	c.sendMu.Lock()
+	if len(c.sendQueue) >= maxSendQueue {
+		c.sendMu.Unlock()
 		return errSendBufferFull
 	}
+	c.sendQueue = append(c.sendQueue, data)
+	c.sendMu.Unlock()
+
+	select {
+	case c.sendReady <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 func (c *Connection) Subscribe(channel string) {
