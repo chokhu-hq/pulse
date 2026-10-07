@@ -29,11 +29,11 @@ jobs:
       - name: Run benchmarks
         run: |
           ulimit -n 65536
-          go run ./bench -bin ./pulse -md bench.md -json bench.json -readme README.md
+          go run ./bench -bin ./pulse -md "$RUNNER_TEMP/bench.md" -json "$RUNNER_TEMP/bench.json" -readme README.md
 
       - name: Publish summary
         if: always()
-        run: test -f bench.md && cat bench.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: test -f "$RUNNER_TEMP/bench.md" && cat "$RUNNER_TEMP/bench.md" >> "$GITHUB_STEP_SUMMARY" || true
 
       - name: Commit README benchmarks
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -51,5 +51,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-${{ github.sha }}
-          path: bench.json
+          path: ${{ runner.temp }}/bench.json
           if-no-files-found: ignore
