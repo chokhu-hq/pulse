@@ -337,6 +337,11 @@ func procStat(pid int) (rssKB int64, cpuSeconds float64) {
 
 func markdown(results []result) string {
 	var b strings.Builder
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		runURL := fmt.Sprintf("%s/%s/actions/runs/%s", os.Getenv("GITHUB_SERVER_URL"), os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_RUN_ID"))
+		fmt.Fprintf(&b, "> Measured automatically on a shared GitHub Actions runner ([run](%s), commit `%.7s`). Expect lower numbers and some run-to-run variance compared to dedicated hardware.\n\n",
+			runURL, os.Getenv("GITHUB_SHA"))
+	}
 	fmt.Fprintf(&b, "%s/%s, %d CPUs, payload %d bytes, server and load generator on the same host, measured %s\n\n",
 		runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), scenarios[0].PayloadSize, time.Now().UTC().Format("2006-01-02"))
 	fmt.Fprintf(&b, "| Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |\n")
