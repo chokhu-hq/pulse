@@ -10,10 +10,10 @@ linux/amd64, 4 CPUs, payload 200 bytes, server and load generator on the same ho
 
 | Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| publish throughput | 1 | 256 | 36.7k | 36.6k | 200 | 54.31 µs | - |
-| fan-out 100 subscribers | 100 | 32 | 8.3k | 828.9k | 0 | 2.50 µs | - |
-| fan-out 1000 subscribers | 1000 | 16 | 905 | 905.0k | 0 | 2.65 µs | 25.1 KB |
-| fan-out 5000 subscribers | 5000 | 16 | 186 | 923.5k | 0 | 2.56 µs | 24.2 KB |
+| publish throughput | 1 | 256 | 35.1k | 35.1k | 0 | 53.90 µs | - |
+| fan-out 100 subscribers | 100 | 32 | 8.4k | 839.6k | 0 | 2.43 µs | - |
+| fan-out 1000 subscribers | 1000 | 16 | 834 | 833.3k | 0 | 2.87 µs | 25.0 KB |
+| fan-out 5000 subscribers | 5000 | 16 | 188 | 931.5k | 0 | 2.56 µs | 24.2 KB |
 
 <!-- bench:end -->
 
