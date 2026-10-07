@@ -6,14 +6,14 @@ A Pusher Protocol v7 compatible server written in Go. Pulse implements the offic
 
 <!-- bench:start -->
 
-linux/amd64, 16 CPUs, payload 200 bytes, server and load generator on the same host
+linux/amd64, 4 CPUs, payload 200 bytes, server and load generator on the same host, measured 2026-10-07
 
-| Scenario                 | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
-| ------------------------ | ----------: | ---------: | ----------: | -----------: | ------: | --------------------: | ---------: |
-| publish throughput       |           1 |        256 |      106.4k |        93.5k |   11988 |              62.49 µs |          - |
-| fan-out 100 subscribers  |         100 |         32 |       12.4k |        1.24M |       0 |               3.50 µs |          - |
-| fan-out 1000 subscribers |        1000 |         16 |        2.8k |        2.84M |       0 |               2.58 µs |    22.7 KB |
-| fan-out 5000 subscribers |        5000 |         16 |         496 |        2.48M |       0 |               3.59 µs |    19.0 KB |
+| Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| publish throughput | 1 | 256 | 36.7k | 36.6k | 200 | 54.31 µs | - |
+| fan-out 100 subscribers | 100 | 32 | 8.3k | 828.9k | 0 | 2.50 µs | - |
+| fan-out 1000 subscribers | 1000 | 16 | 905 | 905.0k | 0 | 2.65 µs | 25.1 KB |
+| fan-out 5000 subscribers | 5000 | 16 | 186 | 923.5k | 0 | 2.56 µs | 24.2 KB |
 
 <!-- bench:end -->
 
