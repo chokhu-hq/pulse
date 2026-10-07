@@ -4,6 +4,8 @@ A Pusher Protocol v7 compatible server written in Go. Pulse implements the offic
 
 ## Benchmarks
 
+<!-- bench:start -->
+
 linux/amd64, 16 CPUs, payload 200 bytes, server and load generator on the same host
 
 | Scenario                 | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
@@ -12,6 +14,8 @@ linux/amd64, 16 CPUs, payload 200 bytes, server and load generator on the same h
 | fan-out 100 subscribers  |         100 |         32 |       12.4k |        1.24M |       0 |               3.50 µs |          - |
 | fan-out 1000 subscribers |        1000 |         16 |        2.8k |        2.84M |       0 |               2.58 µs |    22.7 KB |
 | fan-out 5000 subscribers |        5000 |         16 |         496 |        2.48M |       0 |               3.59 µs |    19.0 KB |
+
+<!-- bench:end -->
 
 ## Installation
 

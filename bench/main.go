@@ -63,6 +63,7 @@ func main() {
 	bin := flag.String("bin", "./pulse", "path to pulse binary")
 	jsonOut := flag.String("json", "", "write results as JSON to this file")
 	mdOut := flag.String("md", "", "write results as a markdown table to this file")
+	readme := flag.String("readme", "", "replace the section between bench markers in this file")
 	flag.Parse()
 
 	var results []result
@@ -76,8 +77,16 @@ func main() {
 		results = append(results, res)
 	}
 
-	md := markdown(results)
+	table := markdown(results)
+	md := "## Pulse benchmarks\n\n" + table
 	fmt.Print(md)
+
+	if *readme != "" {
+		if err := updateReadme(*readme, table); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 
 	if *mdOut != "" {
 		if err := os.WriteFile(*mdOut, []byte(md), 0o644); err != nil {
@@ -328,9 +337,8 @@ func procStat(pid int) (rssKB int64, cpuSeconds float64) {
 
 func markdown(results []result) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "## Pulse benchmarks\n\n")
-	fmt.Fprintf(&b, "%s/%s, %d CPUs, payload %d bytes, server and load generator on the same host\n\n",
-		runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), scenarios[0].PayloadSize)
+	fmt.Fprintf(&b, "%s/%s, %d CPUs, payload %d bytes, server and load generator on the same host, measured %s\n\n",
+		runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), scenarios[0].PayloadSize, time.Now().UTC().Format("2006-01-02"))
 	fmt.Fprintf(&b, "| Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |\n")
 	fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---:|---:|---:|\n")
 	for _, r := range results {
@@ -343,6 +351,24 @@ func markdown(results []result) string {
 			r.Expected-r.Delivered, r.ServerCPUPerEvent, rss)
 	}
 	return b.String()
+}
+
+func updateReadme(path, table string) error {
+	const startMarker, endMarker = "<!-- bench:start -->", "<!-- bench:end -->"
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	s := string(data)
+	start := strings.Index(s, startMarker)
+	end := strings.Index(s, endMarker)
+	if start < 0 || end < start {
+		return fmt.Errorf("%s: missing %s / %s markers", path, startMarker, endMarker)
+	}
+
+	updated := s[:start+len(startMarker)] + "\n\n" + table + "\n" + s[end:]
+	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
 func human(v float64) string {
