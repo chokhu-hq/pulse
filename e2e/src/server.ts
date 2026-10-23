@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { HOST, PORT } from "./constants.js";
@@ -9,21 +9,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const E2E_DIR = join(__dirname, "..");
 const REPO_ROOT = join(E2E_DIR, "..");
 const BINARY = join(REPO_ROOT, process.platform === "win32" ? "pulse.exe" : "pulse");
-const CONFIG = join(E2E_DIR, "config.json");
+const CONFIG = join(E2E_DIR, "config.toml");
 
 let proc: ChildProcess | undefined;
 
 function buildBinaryIfMissing(): void {
   if (existsSync(BINARY)) return;
-  console.log("[e2e] pulse binary not found, building with `go build`...");
-  const res = spawnSync("go", ["build", "-o", BINARY, "."], {
+  console.log("[e2e] pulse binary not found, building with `cargo build`...");
+  const res = spawnSync("cargo", ["build", "--release", "-p", "pulse"], {
     cwd: REPO_ROOT,
     stdio: "inherit",
   });
 
   if (res.status !== 0) {
-    throw new Error(`failed to build pulse binary (go build exit ${res.status})`);
+    throw new Error(`failed to build pulse binary (cargo build exit ${res.status})`);
   }
+  copyFileSync(join(REPO_ROOT, "target", "release", basename(BINARY)), BINARY);
 }
 
 async function waitForHealth(timeoutMs = 15_000): Promise<void> {
@@ -47,7 +48,7 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
 export default async function setup(): Promise<() => Promise<void>> {
   buildBinaryIfMissing();
 
-  proc = spawn(BINARY, ["-config", CONFIG, "-port", String(PORT)], {
+  proc = spawn(BINARY, ["--config", CONFIG, "--port", String(PORT)], {
     cwd: REPO_ROOT,
     stdio: ["ignore", "inherit", "inherit"],
     env: { ...process.env, PULSE_PORT: String(PORT) },

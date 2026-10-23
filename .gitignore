@@ -1,22 +1,9 @@
 # Binaries
-pulse
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+/pulse
+/pulse.exe
 
-# Test binary
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Dependency directories
-vendor/
-
-# Go workspace file
-go.work
+# Build output
+/target
 
 # IDE
 .idea/

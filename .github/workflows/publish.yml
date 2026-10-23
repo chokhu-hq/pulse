@@ -52,34 +52,61 @@ jobs:
 
   binaries:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # built on 22.04 so the linux binaries run on glibc 2.35 and newer
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, name: pulse-linux-amd64 }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, name: pulse-linux-arm64 }
+          - { os: macos-latest, target: x86_64-apple-darwin, name: pulse-darwin-amd64 }
+          - { os: macos-latest, target: aarch64-apple-darwin, name: pulse-darwin-arm64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, name: pulse-windows-amd64.exe }
+    runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - uses: actions/setup-go@v5
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: stable
-          cache: true
+          targets: ${{ matrix.target }}
 
-      - name: Build binaries
+      - name: Build binary
+        shell: bash
         run: |
+          cargo build --release --locked -p pulse --target ${{ matrix.target }}
           mkdir dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            os=${target%/*}
-            arch=${target#*/}
-            ext=""
-            [ "$os" = windows ] && ext=".exe"
-            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "dist/pulse-$os-$arch$ext" .
-          done
-          cd dist && sha256sum * > checksums.txt
+          ext=""
+          [ "${{ runner.os }}" = Windows ] && ext=".exe"
+          cp "target/${{ matrix.target }}/release/pulse$ext" "dist/${{ matrix.name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}
+          if-no-files-found: error
+
+  release:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.txt
 
       - name: Replace latest release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           gh release delete latest --cleanup-tag --yes || true

@@ -17,19 +17,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build pulse
-        run: go build -o pulse .
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build pulse and bench
+        run: cargo build --release --locked --workspace
 
       - name: Run benchmarks
+        env:
+          BENCH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ulimit -n 65536
-          go run ./bench -bin ./pulse -md "$RUNNER_TEMP/bench.md" -json "$RUNNER_TEMP/bench.json" -readme README.md
+          ./target/release/bench --bin ./target/release/pulse --md "$RUNNER_TEMP/bench.md" --json "$RUNNER_TEMP/bench.json" --readme README.md
 
       - name: Publish summary
         if: always()

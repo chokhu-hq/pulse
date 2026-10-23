@@ -1,6 +1,6 @@
 # Pulse
 
-A Pusher Protocol v7 compatible server written in Go. Pulse implements the official Pusher Channels protocol, allowing you to use any Pusher SDK with your own self-hosted server.
+A Pusher Protocol v7 compatible server written in Rust. Pulse implements the official Pusher Channels protocol, allowing you to use any Pusher SDK with your own self-hosted server.
 
 ## Benchmarks
 
@@ -23,7 +23,7 @@ linux/amd64, 4 CPUs, payload 200 bytes, server and load generator on the same ho
 
 ### Build from Source
 
-Requirements: Go 1.21 or higher
+Requirements: Rust 1.99 or newer
 
 ```bash
 # Clone the repository
@@ -31,11 +31,20 @@ git clone https://github.com/aelpxy/pulse.git
 cd pulse
 
 # Build binary
-go build -ldflags="-s -w" -o pulse
+cargo build --release
 
 # Run the server
-./pulse -config=config.json
+./target/release/pulse --config config.toml
 ```
+
+### Command Line Flags
+
+| Flag | Environment | Description |
+| ---------- | ------ | ------------- |
+| `--config <path>` | `PULSE_CONFIG` | Path to the config file (default: `config.toml`) |
+| `--port <port>` | `PULSE_PORT` | Port to listen on, overriding the config file |
+| `--max-connections <n>` | | Maximum concurrent connections across all apps (default: 100000) |
+| `--debug` | | Enable debug logging, overriding the config file |
 
 ## Usage Examples
 
@@ -89,34 +98,29 @@ channel.bind("my-event", (data: any) => {
 
 ## Configuration
 
-An example config (name this as `config.json` then pass it via flag `-config=path`)
+An example config in TOML (name this as `config.toml` or pass its path via `--config path`). Each app is an `[[apps]]` table. Unknown fields are rejected so typos fail at startup.
 
-```json
-{
-  "server": {
-    "debug": true,
-    "port": "8080",
-    "hostname": "",
-    "region": ""
-  },
-  "apps": [
-    {
-      "id": "your-pulse-dev",
-      "key": "your-pulse-dev-key",
-      "secret": "your-pulse-dev-secret",
-      "name": "pulse app",
-      "enabled": true,
-      "max_connections": 10000,
-      "max_channels_per_connection": 50,
-      "allowed_origins": ["*"],
-      "max_message_size": 8192,
-      "max_batch_events": 100,
-      "enable_client_events": true,
-      "max_event_rate": 10,
-      "max_event_burst": 20
-    }
-  ]
-}
+```toml
+[server]
+debug = true
+port = 8080
+hostname = ""
+region = ""
+
+[[apps]]
+id = "your-pulse-dev"
+key = "your-pulse-dev-key"
+secret = "your-pulse-dev-secret"
+name = "pulse app"
+enabled = true
+max_connections = 10000
+max_channels_per_connection = 50
+allowed_origins = ["*"]
+max_message_size = 8192
+max_batch_events = 100
+enable_client_events = true
+max_event_rate = 10
+max_event_burst = 20
 ```
 
 ### Configuration Properties
@@ -126,9 +130,9 @@ An example config (name this as `config.json` then pass it via flag `-config=pat
 | Property | Type | Description |
 | ---------- | ------ | ------------- |
 | `debug` | boolean | Enable debug logging for troubleshooting |
-| `port` | string | Port number the server listens on |
-| `hostname` | string | Hostname/IP the server binds to (empty for all interfaces) |
-| `region` | string | Region identifier (used for clustering) |
+| `port` | integer | Port number the server listens on (default: 8080) |
+| `hostname` | string | Accepted for compatibility; the server always listens on all interfaces |
+| `region` | string | Accepted for compatibility; currently unused |
 
 #### App Properties
 
