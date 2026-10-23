@@ -6,16 +6,16 @@ A Pusher Protocol v7 compatible server written in Rust. Pulse implements the off
 
 <!-- bench:start -->
 
-> Measured automatically on a shared GitHub Actions runner ([run](https://github.com/axerity/pulse/actions/runs/37625251338), commit `1b0c7b1`). Expect lower numbers and some run-to-run variance compared to dedicated hardware.
+> Measured automatically on a shared GitHub Actions runner ([run](https://github.com/chokhu-hq/pulse/actions/runs/39970397540), commit `4a6a4ce`). Expect lower numbers and some run-to-run variance compared to dedicated hardware.
 
-linux/amd64, 4 CPUs, payload 200 bytes, server and load generator on the same host, measured 2026-10-07
+linux/amd64, 4 CPUs, payload 200 bytes, server and load generator on the same host, measured 2026-10-23
 
 | Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| publish throughput | 1 | 256 | 22.9k | 22.9k | 0 | 90.20 µs | - |
-| fan-out 100 subscribers | 100 | 32 | 5.5k | 545.6k | 0 | 3.67 µs | - |
-| fan-out 1000 subscribers | 1000 | 16 | 544 | 544.0k | 0 | 4.17 µs | 25.7 KB |
-| fan-out 5000 subscribers | 5000 | 16 | 156 | 777.0k | 0 | 3.12 µs | 19.4 KB |
+| publish throughput | 1 | 256 | 97.2k | 97.2k | 0 | 21.40 µs | - |
+| fan-out 100 subscribers | 100 | 32 | 20.8k | 2.08M | 0 | 1.09 µs | - |
+| fan-out 1000 subscribers | 1000 | 16 | 1.6k | 1.63M | 0 | 1.38 µs | 8.4 KB |
+| fan-out 5000 subscribers | 5000 | 16 | 653 | 3.18M | 0 | 0.81 µs | 8.0 KB |
 
 <!-- bench:end -->
 
