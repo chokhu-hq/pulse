@@ -87,10 +87,14 @@ impl Connection {
             return;
         }
 
+        // a non-empty queue already has a wake-up pending, so bursts cost one notify
+        let was_empty = outbox.queue.is_empty();
         outbox.queued_bytes += message.len();
         outbox.queue.push(message);
         drop(outbox);
-        self.wake.notify_one();
+        if was_empty {
+            self.wake.notify_one();
+        }
     }
 
     pub(crate) fn send_text(&self, message: String) {

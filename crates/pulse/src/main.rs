@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 
 use anyhow::Context;
 use clap::Parser;
+use tokio::signal::unix::{SignalKind, signal};
 use tracing::{Level, error, info};
 
 use crate::cli::Args;
@@ -21,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     init_tracing(config.debug);
     info!(path = %args.config.display(), debug = config.debug, "config loaded");
 
-    let server = pulse::Server::bind(config).await?;
+    let server = pulse::Server::bind(config)?;
     server.run(shutdown_signal()).await?;
     Ok(())
 }
@@ -43,10 +44,7 @@ async fn ctrl_c() {
     }
 }
 
-#[cfg(unix)]
 async fn shutdown_signal() {
-    use tokio::signal::unix::{SignalKind, signal};
-
     let mut terminate = match signal(SignalKind::terminate()) {
         Ok(terminate) => terminate,
         Err(err) => {
@@ -59,9 +57,4 @@ async fn shutdown_signal() {
         () = ctrl_c() => {}
         _ = terminate.recv() => {}
     }
-}
-
-#[cfg(not(unix))]
-async fn shutdown_signal() {
-    ctrl_c().await;
 }

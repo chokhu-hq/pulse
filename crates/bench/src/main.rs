@@ -1,3 +1,6 @@
+#[cfg(not(target_os = "linux"))]
+compile_error!("bench reads /proc and only supports linux");
+
 mod cli;
 mod http_client;
 mod proc_stats;

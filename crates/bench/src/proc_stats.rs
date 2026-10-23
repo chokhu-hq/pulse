@@ -5,18 +5,13 @@ use anyhow::Context;
 // /proc reports cpu time in clock ticks, which is 100 per second on every linux we target
 const CLOCK_TICKS_PER_SECOND: u64 = 100;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ProcStats {
     pub(crate) rss_kb: u64,
     pub(crate) cpu: Duration,
 }
 
-// linux only; elsewhere the cpu and memory columns read zero
 pub(crate) async fn read(pid: u32) -> anyhow::Result<ProcStats> {
-    if !cfg!(target_os = "linux") {
-        return Ok(ProcStats::default());
-    }
-
     let status = tokio::fs::read_to_string(format!("/proc/{pid}/status"))
         .await
         .context("read proc status")?;

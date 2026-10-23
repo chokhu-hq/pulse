@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::pin::pin;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::http;
 use crate::hub::Hub;
+use crate::listener;
 
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -53,17 +54,11 @@ pub enum ServeError {
 
 impl Server {
     /// Binds the configured port on all interfaces, dual stack when ipv6 is available.
-    pub async fn bind(config: Config) -> Result<Self, ServeError> {
+    ///
+    /// Must be called from within a tokio runtime, which the listener registers with.
+    pub fn bind(config: Config) -> Result<Self, ServeError> {
         let port = config.port;
-        let listener = match TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).await {
-            Ok(listener) => listener,
-            Err(err) => {
-                debug!(error = %err, "ipv6 bind failed, falling back to ipv4");
-                TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
-                    .await
-                    .map_err(|source| ServeError::Bind { port, source })?
-            }
-        };
+        let listener = listener::bind(port).map_err(|source| ServeError::Bind { port, source })?;
 
         info!(count = config.apps.len(), "loaded apps");
         for app in config.apps.iter() {

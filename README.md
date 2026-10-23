@@ -1,6 +1,6 @@
 # Pulse
 
-A Pusher Protocol v7 compatible server written in Rust. Pulse implements the official Pusher Channels protocol, allowing you to use any Pusher SDK with your own self-hosted server.
+A Pusher Protocol v7 compatible server for Linux, written in Rust. Pulse implements the official Pusher Channels protocol, allowing you to use any Pusher SDK with your own self-hosted server.
 
 ## Benchmarks
 
@@ -23,7 +23,7 @@ linux/amd64, 4 CPUs, payload 200 bytes, server and load generator on the same ho
 
 ### Build from Source
 
-Requirements: Rust 1.99 or newer
+Requirements: Linux and Rust 1.99 or newer. Prebuilt binaries need glibc 2.35 or newer.
 
 ```bash
 # Clone the repository
@@ -45,6 +45,8 @@ cargo build --release
 | `--port <port>` | `PULSE_PORT` | Port to listen on, overriding the config file |
 | `--max-connections <n>` | | Maximum concurrent connections across all apps (default: 100000) |
 | `--debug` | | Enable debug logging, overriding the config file |
+
+Pulse uses one worker thread per CPU by default. Set `TOKIO_WORKER_THREADS` to use fewer, for example when sharing the host with other busy processes; fewer threads also batch more messages per write, which lowers CPU per delivery.
 
 ## Usage Examples
 

@@ -36,8 +36,8 @@ mod tests {
         task: JoinHandle<Result<(), pulse::ServeError>>,
     }
 
-    async fn start() -> Running {
-        let server = Server::bind(Config::parse(CONFIG).unwrap()).await.unwrap();
+    fn start() -> Running {
+        let server = Server::bind(Config::parse(CONFIG).unwrap()).unwrap();
         let port = server.local_addr().unwrap().port();
         let (stop, stopped) = oneshot::channel::<()>();
         let task = tokio::spawn(server.run(async {
@@ -109,7 +109,7 @@ mod tests {
 
     #[tokio::test]
     async fn delivers_signed_rest_events_to_subscribers() {
-        let server = start().await;
+        let server = start();
         let mut socket = connect(server.addr).await;
 
         let established = next_json(&mut socket).await;
@@ -154,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_requests_signed_with_the_wrong_secret() {
-        let server = start().await;
+        let server = start();
         let body = r#"{"name":"update","channel":"news","data":"{}"}"#;
 
         assert_eq!(
@@ -169,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn closes_websockets_on_shutdown() {
-        let server = start().await;
+        let server = start();
         let mut socket = connect(server.addr).await;
         next_json(&mut socket).await;
 
