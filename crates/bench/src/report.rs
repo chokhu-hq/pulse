@@ -18,7 +18,10 @@ pub(crate) fn progress(scenario: &str) {
 }
 
 pub(crate) async fn write(args: &Args, outcomes: &[Outcome]) -> anyhow::Result<()> {
-    let table = markdown(args, outcomes, SystemTime::now());
+    let cpuinfo = tokio::fs::read_to_string("/proc/cpuinfo")
+        .await
+        .context("read /proc/cpuinfo")?;
+    let table = markdown(args, outcomes, cpu_model(&cpuinfo), SystemTime::now());
     let report = format!("## Pulse benchmarks\n\n{table}");
     print!("{report}");
 
@@ -34,24 +37,28 @@ pub(crate) async fn write(args: &Args, outcomes: &[Outcome]) -> anyhow::Result<(
     Ok(())
 }
 
-fn markdown(args: &Args, outcomes: &[Outcome], now: SystemTime) -> String {
+// shared runners land on different cpu models, which explains most run to run swings
+fn markdown(args: &Args, outcomes: &[Outcome], cpu_model: Option<&str>, now: SystemTime) -> String {
     let runner_note = args.run_url.as_deref().map_or_else(String::new, |url| {
         let commit = args.commit.as_deref().unwrap_or_default();
         let commit = commit.get(..7).unwrap_or(commit);
         format!(
-            "> Measured automatically on a shared GitHub Actions runner ([run]({url}), commit `{commit}`). \
-             Expect lower numbers and some run-to-run variance compared to dedicated hardware.\n\n"
+            "> Measured on a shared GitHub Actions runner. Expect lower numbers than dedicated hardware \
+             and swings between runs. [Run]({url}) for commit `{commit}`.\n\n"
         )
     });
     let cpus = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
+    let cpu_model = cpu_model.map_or_else(String::new, |model| format!("{model} with "));
     let payload = SCENARIOS
         .first()
         .map_or(0, |scenario| scenario.payload_bytes);
     let rows: String = outcomes.iter().map(row).collect::<Vec<_>>().concat();
 
     format!(
-        "{runner_note}{os}/{arch}, {cpus} CPUs, payload {payload} bytes, server and load generator on the same host, \
-         measured {date}\n\n\
+        "{runner_note}\
+         - **Host:** {cpu_model}{cpus} CPUs on {os}/{arch}\n\
+         - **Payload:** {payload} bytes\n\
+         - **Measured:** {date} with the server and load generator on the same host\n\n\
          | Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |\n\
          |---|---:|---:|---:|---:|---:|---:|---:|\n\
          {rows}",
@@ -59,6 +66,14 @@ fn markdown(args: &Args, outcomes: &[Outcome], now: SystemTime) -> String {
         arch = go_arch(std::env::consts::ARCH),
         date = utc_date(now),
     )
+}
+
+// x86 reports "model name"; arm kernels usually omit it, so the header leaves it out
+fn cpu_model(cpuinfo: &str) -> Option<&str> {
+    cpuinfo.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        (key.trim() == "model name").then(|| value.trim())
+    })
 }
 
 fn row(outcome: &Outcome) -> String {
@@ -187,6 +202,19 @@ mod tests {
                 "date of {secs}"
             );
         }
+    }
+
+    #[test]
+    fn cpu_models() {
+        let x86 = "processor\t: 0\nvendor_id\t: AuthenticAMD\nmodel name\t: AMD EPYC 7763 64-Core Processor\n";
+        let arm = "processor\t: 0\nBogoMIPS\t: 50.00\nCPU part\t: 0xd0c\n";
+
+        assert_eq!(
+            cpu_model(x86),
+            Some("AMD EPYC 7763 64-Core Processor"),
+            "x86 model name"
+        );
+        assert_eq!(cpu_model(arm), None, "arm has no model name");
     }
 
     #[test]
