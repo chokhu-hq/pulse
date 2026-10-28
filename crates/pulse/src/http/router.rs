@@ -72,6 +72,10 @@ async fn metrics(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
         .app_connection_counts()
         .iter()
         .map(|(app_key, count)| {
+            let app_key = app_key
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n");
             format!("pulse_connections_active{{app_key=\"{app_key}\"}} {count}\n")
         })
         .collect::<Vec<_>>()
@@ -91,4 +95,34 @@ async fn metrics(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
     );
 
     ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn metrics_escapes_special_characters_in_app_keys() {
+        let app_key = "key\"\\\nlabel";
+        let config = Config::parse(&format!(
+            "[[apps]]\nid = 'app'\nkey = {}\nsecret = 'secret'\nenabled = true\n",
+            serde_json::to_string(app_key).unwrap()
+        ))
+        .unwrap();
+        let hub = Arc::new(Hub::new(config, CancellationToken::new()));
+        let conn = hub.register(hub.apps.by_key(app_key).unwrap()).unwrap();
+        let response = metrics(State(Arc::clone(&hub))).await.into_response();
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
+        assert!(
+            body.lines()
+                .any(|line| line == r#"pulse_connections_active{app_key="key\"\\\nlabel"} 1"#),
+            "metrics must escape quotes, backslashes and newlines: {body}"
+        );
+        drop(conn);
+    }
 }

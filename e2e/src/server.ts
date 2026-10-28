@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync } from "node:fs";
+import { copyFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -13,9 +13,8 @@ const CONFIG = join(E2E_DIR, "config.toml");
 
 let proc: ChildProcess | undefined;
 
-function buildBinaryIfMissing(): void {
-  if (existsSync(BINARY)) return;
-  console.log("[e2e] pulse binary not found, building with `cargo build`...");
+function buildBinary(): void {
+  console.log("[e2e] building pulse with `cargo build`...");
   const res = spawnSync("cargo", ["build", "--release", "-p", "pulse"], {
     cwd: REPO_ROOT,
     stdio: "inherit",
@@ -46,7 +45,7 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
 }
 
 export default async function setup(): Promise<() => Promise<void>> {
-  buildBinaryIfMissing();
+  buildBinary();
 
   proc = spawn(BINARY, ["--config", CONFIG, "--port", String(PORT)], {
     cwd: REPO_ROOT,
@@ -60,13 +59,20 @@ export default async function setup(): Promise<() => Promise<void>> {
     }
   });
 
-  await waitForHealth();
+  try {
+    await waitForHealth();
+  } catch (err) {
+    proc.kill("SIGTERM");
+    proc = undefined;
+    throw err;
+  }
   console.log(`[e2e] pulse healthy on ${HOST}:${PORT}`);
 
   return async () => {
     if (!proc) return;
     const p = proc;
     proc = undefined;
+    if (p.exitCode != null || p.signalCode != null) return;
     await new Promise<void>((resolve) => {
       p.once("exit", () => resolve());
       p.kill("SIGTERM");

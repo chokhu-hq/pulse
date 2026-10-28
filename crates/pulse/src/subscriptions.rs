@@ -70,6 +70,16 @@ impl Hub {
 
     fn join_presence(&self, conn: &Connection, channel: &ChannelName, member: Member) {
         let key = ChannelKey::new(&conn.app.key, channel);
+        let _gate = self.lock_presence(&key);
+        match self.presence.user_id(&key, &conn.id) {
+            Some(previous) if previous == member.user_id => {
+                let data = self.presence.data(&key);
+                return conn.send_text(protocol::presence_subscription_succeeded(channel, &data));
+            }
+            Some(_) => self.leave_presence(&key, conn, channel),
+            None => {}
+        }
+
         let added = protocol::member_added(channel, &member);
         if self.presence.join(&key, &conn.id, member) {
             self.channels.broadcast(&key, Some(&conn.id), || added);
@@ -87,13 +97,19 @@ impl Hub {
 
     pub(crate) fn leave_channel(&self, conn: &Connection, channel: &ChannelName) {
         let key = ChannelKey::new(&conn.app.key, channel);
-        if let Some(Departure::LastConnection(user_id)) = self.presence.leave(&key, &conn.id) {
-            self.channels.broadcast(&key, Some(&conn.id), || {
+        {
+            let _gate = self.lock_presence(&key);
+            self.leave_presence(&key, conn, channel);
+        }
+        self.channels.unsubscribe(&key, &conn.id);
+    }
+
+    fn leave_presence(&self, key: &ChannelKey, conn: &Connection, channel: &ChannelName) {
+        if let Some(Departure::LastConnection(user_id)) = self.presence.leave(key, &conn.id) {
+            self.channels.broadcast(key, Some(&conn.id), || {
                 protocol::member_removed(channel, &user_id)
             });
         }
-
-        self.channels.unsubscribe(&key, &conn.id);
     }
 
     pub(crate) fn forward_client_event(
@@ -177,7 +193,9 @@ fn presence_member(conn: &Connection, channel_data: Option<&str>) -> Result<Memb
             Rejection::InvalidChannelData
         }),
         None => Ok(Member {
-            user_id: conn.id.to_string(),
+            user_id: conn
+                .user_id()
+                .map_or_else(|| conn.id.to_string(), str::to_owned),
             user_info: None,
         }),
     }

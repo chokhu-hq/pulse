@@ -133,6 +133,7 @@ max_event_burst = 20
 | ---------- | ------ | ------------- |
 | `debug` | boolean | Enable debug logging for troubleshooting |
 | `port` | integer | Port number the server listens on (default: 8080) |
+| `max_http_connections` | integer | Maximum concurrent HTTP connections, not counting upgraded WebSocket connections. Extra connections are closed (default: 200000) |
 | `hostname` | string | Accepted for compatibility; the server always listens on all interfaces |
 | `region` | string | Accepted for compatibility; currently unused |
 
@@ -153,6 +154,10 @@ max_event_burst = 20
 | `enable_client_events` | boolean | Allow clients to trigger events prefixed with `client-` |
 | `max_event_rate` | number | Maximum client events per second (default: 10) |
 | `max_event_burst` | number | Maximum burst capacity for client events (default: 20) |
+
+## Securing operational endpoints
+
+`/stats`, `/apps` and `/metrics` are unauthenticated and `/apps` lists app keys. Pulse leaves access control to the reverse proxy, so restrict these paths there and expose only `/app/*` and `/apps/*` publicly.
 
 ## License
 

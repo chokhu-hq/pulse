@@ -25,6 +25,10 @@ pub(crate) enum ApiError {
     BatchTooLarge {
         max: usize,
     },
+    EventTooLarge {
+        max: usize,
+    },
+    MissingField(&'static str),
     UserCountNeedsPresencePrefix,
     UserCountNeedsPresenceChannel,
     UsersNeedPresenceChannel,
@@ -71,6 +75,11 @@ impl ApiError {
                 StatusCode::PAYLOAD_TOO_LARGE,
                 format!("Batch size exceeds maximum of {max} events"),
             ),
+            Self::EventTooLarge { max } => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("Event data exceeds maximum of {max} bytes"),
+            ),
+            Self::MissingField(field) => bad_request(&format!("Missing required field: {field}")),
             Self::UserCountNeedsPresencePrefix => {
                 bad_request("user_count requires filter_by_prefix=presence-")
             }
