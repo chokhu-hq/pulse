@@ -64,18 +64,17 @@ impl Presence {
             .write()
             .unwrap_or_else(PoisonError::into_inner);
         let members = channels.entry(channel.clone()).or_default();
-        if let Some(previous) = members.by_connection.remove(conn_id) {
+        let user_id = member.user_id.clone();
+        if let Some(previous) = members.by_connection.insert(conn_id.clone(), member) {
+            if previous.user_id == user_id {
+                return false;
+            }
             members.release(&previous.user_id);
         }
 
-        let count = members
-            .connections_per_user
-            .entry(member.user_id.clone())
-            .or_default();
+        let count = members.connections_per_user.entry(user_id).or_default();
         *count += 1;
-        let is_first = *count == 1;
-        members.by_connection.insert(conn_id.clone(), member);
-        is_first
+        *count == 1
     }
 
     pub(crate) fn leave(&self, channel: &ChannelKey, conn_id: &SocketId) -> Option<Departure> {
@@ -210,6 +209,24 @@ mod tests {
             presence.data(&key()).ids,
             vec!["bob".to_owned()],
             "alice was replaced"
+        );
+    }
+
+    #[test]
+    fn rejoining_with_same_user_is_not_new() {
+        let presence = Presence::default();
+        let conn: SocketId = "1.1".parse().unwrap();
+
+        assert!(presence.join(&key(), &conn, member("alice")), "first join");
+        assert!(
+            !presence.join(&key(), &conn, member("alice")),
+            "same user on the same connection is not a new member"
+        );
+        assert_eq!(presence.user_count(&key()), 1, "one user");
+        let last = presence.leave(&key(), &conn);
+        assert!(
+            matches!(last, Some(Departure::LastConnection(ref id)) if id == "alice"),
+            "got {last:?}"
         );
     }
 

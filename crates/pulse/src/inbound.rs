@@ -126,14 +126,6 @@ fn client_event(hub: &Hub, session: &mut Session, msg: &Incoming) {
     }
 
     let conn = Arc::clone(&session.conn);
-    if !session.limiter.allow() {
-        conn.send_error(
-            "Rate limit exceeded for client events",
-            Some(ErrorCode::ClientEventRateLimited),
-        );
-        return;
-    }
-
     let unauthorized = Some(ErrorCode::ConnectionUnauthorized);
     if !conn.app.allows_client_events {
         conn.send_error("Client events are not enabled for this app", unauthorized);
@@ -157,7 +149,71 @@ fn client_event(hub: &Hub, session: &mut Session, msg: &Incoming) {
         return;
     }
 
-    if session.channels.contains(&channel) {
-        hub.forward_client_event(&conn, &channel, msg);
+    if !session.channels.contains(&channel) {
+        return;
+    }
+    if !session.limiter.allow() {
+        conn.send_error(
+            "Rate limit exceeded for client events",
+            Some(ErrorCode::ClientEventRateLimited),
+        );
+        return;
+    }
+    hub.forward_client_event(&conn, &channel, msg);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use serde_json::json;
+    use tokio_util::sync::CancellationToken;
+
+    use super::*;
+    use crate::config::Config;
+    use crate::rate_limit::RateLimiter;
+
+    #[test]
+    fn unsubscribed_client_events_do_not_use_rate_limit() {
+        let hub = Hub::new(
+            Config::parse(
+                r#"[[apps]]
+id = "app"
+key = "key"
+secret = "secret"
+enabled = true
+enable_client_events = true
+max_event_rate = 1
+max_event_burst = 1
+"#,
+            )
+            .unwrap(),
+            CancellationToken::new(),
+        );
+        let app = hub.apps.by_key("key").unwrap();
+        let conn = hub.register(app).unwrap();
+        conn.take(Vec::new());
+        let mut session = Session {
+            conn,
+            channels: HashSet::new(),
+            limiter: RateLimiter::new(app.client_event_rate, app.client_event_burst),
+        };
+        let event = json!({ "event": "client-typing", "channel": "private-room", "data": "{}" });
+
+        handle(&hub, &mut session, &event.to_string());
+        handle(&hub, &mut session, &event.to_string());
+        assert!(
+            session.conn.take(Vec::new()).messages.is_empty(),
+            "unsubscribed events are dropped without a rate limit error"
+        );
+
+        session
+            .channels
+            .insert(ChannelName::try_from("private-room".to_owned()).unwrap());
+        handle(&hub, &mut session, &event.to_string());
+        assert!(
+            session.conn.take(Vec::new()).messages.is_empty(),
+            "the first subscribed event is within the burst"
+        );
     }
 }

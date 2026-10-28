@@ -71,13 +71,12 @@ impl Hub {
     fn join_presence(&self, conn: &Connection, channel: &ChannelName, member: Member) {
         let key = ChannelKey::new(&conn.app.key, channel);
         let _gate = self.lock_presence(&key);
-        match self.presence.user_id(&key, &conn.id) {
-            Some(previous) if previous == member.user_id => {
-                let data = self.presence.data(&key);
-                return conn.send_text(protocol::presence_subscription_succeeded(channel, &data));
-            }
-            Some(_) => self.leave_presence(&key, conn, channel),
-            None => {}
+        if self
+            .presence
+            .user_id(&key, &conn.id)
+            .is_some_and(|previous| previous != member.user_id)
+        {
+            self.leave_presence(&key, conn, channel);
         }
 
         let added = protocol::member_added(channel, &member);
@@ -153,14 +152,6 @@ fn check(session: &Session, subscription: &Subscription) -> Result<Option<Member
         return Err(Rejection::NotAllowed);
     }
 
-    let member = match kind {
-        ChannelKind::Presence => Some(presence_member(conn, subscription.channel_data.as_deref())?),
-        ChannelKind::Public
-        | ChannelKind::Private
-        | ChannelKind::PrivateEncrypted
-        | ChannelKind::ServerToUser => None,
-    };
-
     if kind.requires_auth() {
         let auth = subscription
             .auth
@@ -175,6 +166,14 @@ fn check(session: &Session, subscription: &Subscription) -> Result<Option<Member
             return Err(Rejection::InvalidSignature);
         }
     }
+
+    let member = match kind {
+        ChannelKind::Presence => Some(presence_member(conn, subscription.channel_data.as_deref())?),
+        ChannelKind::Public
+        | ChannelKind::Private
+        | ChannelKind::PrivateEncrypted
+        | ChannelKind::ServerToUser => None,
+    };
 
     let at_limit = conn
         .app
