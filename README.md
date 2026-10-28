@@ -6,18 +6,18 @@ A Pusher Protocol v7 compatible server for Linux, written in Rust. Pulse impleme
 
 <!-- bench:start -->
 
-> Measured on a shared GitHub Actions runner. Expect lower numbers than dedicated hardware and swings between runs. [Run](https://github.com/chokhu-hq/pulse/actions/runs/39975234727) for commit `9abcddb`.
+> Measured on a shared GitHub Actions runner. Expect lower numbers than dedicated hardware and swings between runs. [Run](https://github.com/chokhu-hq/pulse/actions/runs/40665918572) for commit `e16a287`.
 
-- **Host:** AMD EPYC 9V45 96-Core Processor with 4 CPUs on linux/amd64
+- **Host:** INTEL(R) XEON(R) PLATINUM 8573C with 4 CPUs on linux/amd64
 - **Payload:** 200 bytes
-- **Measured:** 2026-10-23 with the server and load generator on the same host
+- **Measured:** 2026-10-28 with the server and load generator on the same host
 
 | Scenario | Subscribers | Publishers | Publishes/s | Deliveries/s | Dropped | Server CPU / delivery | RSS / conn |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| publish throughput | 1 | 256 | 130.0k | 130.0k | 0 | 15.70 µs | - |
-| fan-out 100 subscribers | 100 | 32 | 26.6k | 2.65M | 0 | 0.84 µs | - |
-| fan-out 1000 subscribers | 1000 | 16 | 2.3k | 2.26M | 0 | 0.99 µs | 8.8 KB |
-| fan-out 5000 subscribers | 5000 | 16 | 819 | 3.94M | 0 | 0.66 µs | 8.1 KB |
+| publish throughput | 1 | 256 | 98.3k | 98.3k | 0 | 21.70 µs | - |
+| fan-out 100 subscribers | 100 | 32 | 17.2k | 1.71M | 0 | 1.17 µs | - |
+| fan-out 1000 subscribers | 1000 | 16 | 1.6k | 1.58M | 0 | 1.24 µs | 9.0 KB |
+| fan-out 5000 subscribers | 5000 | 16 | 579 | 2.81M | 0 | 0.80 µs | 8.0 KB |
 
 <!-- bench:end -->
 
