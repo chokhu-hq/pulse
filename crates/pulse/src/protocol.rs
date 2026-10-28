@@ -61,7 +61,6 @@ pub(crate) struct Outgoing<'a> {
     pub(crate) event: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) channel: Option<&'a str>,
-    #[serde(skip_serializing_if = "str::is_empty")]
     pub(crate) data: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) user_id: Option<&'a str>,
@@ -195,18 +194,18 @@ mod tests {
     }
 
     #[test]
-    fn omits_empty_fields() {
+    fn omits_optional_fields() {
         let event = Outgoing {
             event: "e",
             channel: None,
-            data: "",
+            data: "{}",
             user_id: None,
         };
 
         assert_eq!(
             event.encode(),
-            r#"{"event":"e"}"#,
-            "empty fields are omitted"
+            r#"{"event":"e","data":"{}"}"#,
+            "optional fields are omitted"
         );
     }
 }

@@ -11,6 +11,7 @@ use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -30,6 +31,7 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
 pub struct Server {
     listener: TcpListener,
     hub: Arc<Hub>,
+    connection_slots: Arc<Semaphore>,
 }
 
 /// Reasons the server fails to start or to stop cleanly.
@@ -65,8 +67,13 @@ impl Server {
             info!(name = %app.name, key = %app.key, max_connections = app.max_connections.map(NonZeroUsize::get), "app registered");
         }
 
+        let connection_slots = Arc::new(Semaphore::new(config.max_http_connections.get()));
         let hub = Arc::new(Hub::new(config, CancellationToken::new()));
-        Ok(Self { listener, hub })
+        Ok(Self {
+            listener,
+            hub,
+            connection_slots,
+        })
     }
 
     /// Address the server is listening on.
@@ -76,7 +83,11 @@ impl Server {
 
     /// Serves until `shutdown` resolves, then drains http requests and closes websocket sessions.
     pub async fn run(self, shutdown: impl Future<Output = ()>) -> Result<(), ServeError> {
-        let Self { listener, hub } = self;
+        let Self {
+            listener,
+            hub,
+            connection_slots,
+        } = self;
         let tracker = TaskTracker::new();
         let router = http::router(Arc::clone(&hub), tracker.clone());
         let mut shutdown = pin!(shutdown);
@@ -86,7 +97,10 @@ impl Server {
             tokio::select! {
                 () = &mut shutdown => break,
                 accepted = listener.accept() => match accepted {
-                    Ok((stream, _)) => serve_connection(stream, &router, &tracker, &hub.shutdown),
+                    Ok((stream, _)) => match Arc::clone(&connection_slots).try_acquire_owned() {
+                        Ok(slot) => serve_connection(stream, &router, &tracker, &hub.shutdown, slot),
+                        Err(_full) => debug!("connection limit reached, closing connection"),
+                    },
                     Err(err) => {
                         warn!(error = %err, "accept connection");
                         sleep(ACCEPT_ERROR_BACKOFF).await;
@@ -113,11 +127,16 @@ fn self_addr(listener: &TcpListener) -> String {
         .map_or_else(|err| format!("unknown ({err})"), |addr| addr.to_string())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is a distinct handle moved into the task"
+)]
 fn serve_connection(
     stream: TcpStream,
     router: &Router,
     tracker: &TaskTracker,
     shutdown: &CancellationToken,
+    slot: OwnedSemaphorePermit,
 ) {
     // pusher frames are small and latency sensitive, matching go's default
     if let Err(err) = stream.set_nodelay(true) {
@@ -136,6 +155,7 @@ fn serve_connection(
 
     // upgraded connections complete here and live on as tracked websocket sessions
     tracker.spawn(async move {
+        let _slot = slot;
         let mut conn = pin!(conn);
         let result = tokio::select! {
             result = conn.as_mut() => result,

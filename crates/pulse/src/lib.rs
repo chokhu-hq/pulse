@@ -22,5 +22,8 @@ mod session;
 mod socket_id;
 mod subscriptions;
 
+#[cfg(test)]
+mod regression;
+
 pub use config::{Config, ConfigError};
 pub use server::{ServeError, Server};

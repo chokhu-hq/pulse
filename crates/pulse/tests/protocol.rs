@@ -37,7 +37,11 @@ mod tests {
     }
 
     fn start() -> Running {
-        let server = Server::bind(Config::parse(CONFIG).unwrap()).unwrap();
+        start_config(Config::parse(CONFIG).unwrap())
+    }
+
+    fn start_config(config: Config) -> Running {
+        let server = Server::bind(config).unwrap();
         let port = server.local_addr().unwrap().port();
         let (stop, stopped) = oneshot::channel::<()>();
         let task = tokio::spawn(server.run(async {
@@ -186,5 +190,166 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
+    }
+
+    async fn stop(server: Running) {
+        let _ = server.stop.send(());
+        timeout(STEP_TIMEOUT, server.task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejects_event_data_above_configured_limit() {
+        let server =
+            start_config(Config::parse(&format!("{CONFIG}\nmax_message_size = 1024")).unwrap());
+        let body =
+            serde_json::json!({ "name": "update", "channel": "news", "data": "x".repeat(1025) })
+                .to_string();
+        let status = post(server.addr, "/apps/app/events", &body, "secret").await;
+        stop(server).await;
+        assert_eq!(
+            status, 413,
+            "individual event data must respect max_message_size"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_individual_batch_event() {
+        let server =
+            start_config(Config::parse(&format!("{CONFIG}\nmax_message_size = 1024")).unwrap());
+        let body = serde_json::json!({ "batch": [{ "name": "update", "channel": "news", "data": "x".repeat(1025) }] }).to_string();
+        let status = post(server.addr, "/apps/app/batch_events", &body, "secret").await;
+        stop(server).await;
+        assert_eq!(
+            status, 413,
+            "batch events must each respect max_message_size"
+        );
+    }
+
+    #[tokio::test]
+    async fn accepts_configured_batch_count_with_valid_event_sizes() {
+        let server = start();
+        let batch: Vec<_> = (0..100).map(|_| serde_json::json!({ "name": "update", "channel": "news", "data": "x".repeat(2048) })).collect();
+        let body = serde_json::json!({ "batch": batch }).to_string();
+        let status = post(server.addr, "/apps/app/batch_events", &body, "secret").await;
+        stop(server).await;
+        assert_eq!(
+            status, 200,
+            "100 events below 8192 bytes must fit the configured batch limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_publish_fields() {
+        let server = start();
+        let mut results = Vec::new();
+        for body in [
+            "{}",
+            r#"{"channel":"news","data":"{}"}"#,
+            r#"{"name":"update","channel":"news"}"#,
+            r#"{"name":"update","data":"{}"}"#,
+            r#"{"name":"","channel":"news","data":"{}"}"#,
+        ] {
+            results.push((
+                body,
+                post(server.addr, "/apps/app/events", body, "secret").await,
+            ));
+        }
+        stop(server).await;
+        for (body, status) in results {
+            assert_eq!(status, 400, "invalid trigger accepted: {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_batch_fields() {
+        let server = start();
+        let mut results = Vec::new();
+        for body in [
+            "{}",
+            r#"{"batch":[{"channel":"news","data":"{}"}]}"#,
+            r#"{"batch":[{"name":"update","channel":"news"}]}"#,
+        ] {
+            results.push((
+                body,
+                post(server.addr, "/apps/app/batch_events", body, "secret").await,
+            ));
+        }
+        stop(server).await;
+        for (body, status) in results {
+            assert_eq!(status, 400, "invalid batch accepted: {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_channels_deliver_only_once() {
+        let server = start();
+        let mut socket = connect(server.addr).await;
+        next_json(&mut socket).await;
+        socket
+            .send(Message::text(
+                r#"{"event":"pusher:subscribe","data":{"channel":"news"}}"#,
+            ))
+            .await
+            .unwrap();
+        next_json(&mut socket).await;
+        let status = post(
+            server.addr,
+            "/apps/app/events",
+            r#"{"name":"update","channel":"news","channels":["news","news"],"data":"{}"}"#,
+            "secret",
+        )
+        .await;
+        if status == 200 {
+            assert_eq!(next_json(&mut socket).await["event"], "update");
+            socket
+                .send(Message::text(r#"{"event":"pusher:ping","data":{}}"#))
+                .await
+                .unwrap();
+            let next = next_json(&mut socket).await;
+            stop(server).await;
+            assert_eq!(
+                next["event"], "pusher:pong",
+                "duplicate delivery preceded the ping response"
+            );
+        } else {
+            stop(server).await;
+            assert_eq!(
+                status, 400,
+                "duplicate channel requests must be rejected or deduplicated"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn closes_connections_above_http_limit() {
+        let server = start_config(
+            Config::parse(
+                &format!("{CONFIG}\n").replace("port = 0", "port = 0\nmax_http_connections = 1"),
+            )
+            .unwrap(),
+        );
+        let mut held = TcpStream::connect(server.addr).await.unwrap();
+        held.write_all(b"GET /health HTTP/1.1\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut extra = TcpStream::connect(server.addr).await.unwrap();
+        extra
+            .write_all(b"GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        timeout(STEP_TIMEOUT, extra.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .ok();
+        drop(held);
+        stop(server).await;
+        assert!(
+            response.is_empty(),
+            "connection over the limit must be closed without a response"
+        );
     }
 }

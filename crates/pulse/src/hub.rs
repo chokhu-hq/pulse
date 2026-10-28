@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use std::hash::{BuildHasher, RandomState};
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use crate::apps::{App, Apps};
+use crate::channel::ChannelKey;
 use crate::channels::Channels;
 use crate::config::Config;
 use crate::connection::{Close, Connection};
@@ -30,6 +32,35 @@ struct Registry {
     per_app: HashMap<String, usize>,
 }
 
+const PRESENCE_GATES: usize = 64;
+
+// sharded by channel so a membership change and its broadcast cannot interleave with another on the same channel
+#[derive(Debug)]
+struct PresenceGates {
+    hasher: RandomState,
+    gates: [Mutex<()>; PRESENCE_GATES],
+}
+
+impl PresenceGates {
+    fn new() -> Self {
+        Self {
+            hasher: RandomState::new(),
+            gates: std::array::from_fn(|_| Mutex::new(())),
+        }
+    }
+
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "the shard is reduced modulo the array length"
+    )]
+    fn lock(&self, key: &ChannelKey) -> MutexGuard<'_, ()> {
+        let shard = usize::try_from(self.hasher.hash_one(key)).unwrap_or_default() % PRESENCE_GATES;
+        self.gates[shard]
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Hub {
     pub(crate) apps: Apps,
@@ -38,6 +69,7 @@ pub(crate) struct Hub {
     pub(crate) presence: Presence,
     pub(crate) shutdown: CancellationToken,
     registry: Mutex<Registry>,
+    presence_gates: PresenceGates,
 }
 
 impl Hub {
@@ -49,6 +81,7 @@ impl Hub {
             presence: Presence::default(),
             shutdown,
             registry: Mutex::default(),
+            presence_gates: PresenceGates::new(),
         }
     }
 
@@ -121,6 +154,10 @@ impl Hub {
             );
             conn.close(Close::Normal);
         }
+    }
+
+    pub(crate) fn lock_presence(&self, key: &ChannelKey) -> MutexGuard<'_, ()> {
+        self.presence_gates.lock(key)
     }
 
     pub(crate) fn connection_count(&self) -> usize {

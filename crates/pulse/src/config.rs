@@ -11,6 +11,11 @@ const DEFAULT_MAX_CONNECTIONS: NonZeroUsize = match NonZeroUsize::new(100_000) {
     None => NonZeroUsize::MIN,
 };
 
+const DEFAULT_MAX_HTTP_CONNECTIONS: NonZeroUsize = match NonZeroUsize::new(200_000) {
+    Some(n) => n,
+    None => NonZeroUsize::MIN,
+};
+
 /// Server configuration, loaded from the toml config file and then overridden by flags.
 #[derive(Debug)]
 pub struct Config {
@@ -20,6 +25,8 @@ pub struct Config {
     pub port: u16,
     /// Maximum concurrent websocket connections across all apps.
     pub max_connections: NonZeroUsize,
+    /// Maximum concurrent http connections, not counting upgraded websockets. Extra connections are closed.
+    pub max_http_connections: NonZeroUsize,
     pub(crate) apps: Apps,
 }
 
@@ -29,6 +36,7 @@ impl Default for Config {
             debug: false,
             port: DEFAULT_PORT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
+            max_http_connections: DEFAULT_MAX_HTTP_CONNECTIONS,
             apps: Apps::default(),
         }
     }
@@ -79,6 +87,7 @@ struct ConfigFile {
 struct ServerSection {
     debug: bool,
     port: Option<u16>,
+    max_http_connections: Option<NonZeroUsize>,
     // unused, but accepted so existing config files keep loading
     hostname: String,
     region: String,
@@ -105,6 +114,10 @@ impl Config {
         Ok(Self {
             debug: file.server.debug,
             port: file.server.port.unwrap_or(DEFAULT_PORT),
+            max_http_connections: file
+                .server
+                .max_http_connections
+                .unwrap_or(DEFAULT_MAX_HTTP_CONNECTIONS),
             apps: Apps::from_files(file.apps)?,
             ..Self::default()
         })

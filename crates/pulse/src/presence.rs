@@ -127,7 +127,12 @@ impl Presence {
         let hash = members
             .by_connection
             .values()
-            .filter_map(|member| Some((member.user_id.clone(), member.user_info.clone()?)))
+            .map(|member| {
+                (
+                    member.user_id.clone(),
+                    member.user_info.clone().unwrap_or_default(),
+                )
+            })
             .collect();
         PresenceData {
             count: ids.len(),
